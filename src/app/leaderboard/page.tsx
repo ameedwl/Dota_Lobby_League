@@ -1,0 +1,2 @@
+"use client";import {Leaderboard} from "@/components/leaderboard";import {PageHeader} from "@/components/ui";import {useLeague} from "@/lib/store";import {calculatePlayerStats} from "@/lib/stats";
+export default function Page(){const {players,matches}=useLeague();return <><PageHeader eyebrow="Season I standings" title="Leaderboard" description="Every victory is earned. Rankings are determined by total wins, then win rate."/><Leaderboard stats={calculatePlayerStats(players,matches)}/></>}

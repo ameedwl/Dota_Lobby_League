@@ -1,0 +1,1 @@
+export default function Loading(){return <div className="grid stats-grid" aria-label="Loading"><div className="stat-card">Loading the ancient records…</div><div className="stat-card">Preparing standings…</div><div className="stat-card">Summoning players…</div><div className="stat-card">Sharpening blades…</div></div>}

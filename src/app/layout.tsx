@@ -1,0 +1,4 @@
+import type {Metadata} from "next";import {Rajdhani,Inter} from "next/font/google";import "./globals.css";import {LeagueProvider} from "@/lib/store";import {Nav} from "@/components/nav";import {Shield} from "@/components/icons";
+const raj=Rajdhani({subsets:["latin"],weight:["500","600","700"],variable:"--font-display"});const inter=Inter({subsets:["latin"],variable:"--font-body"});
+export const metadata:Metadata={title:{default:"Lobby Legends",template:"%s | Lobby Legends"},description:"Private Dota lobby league dashboard"};
+export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="en"><body className={`${raj.variable} ${inter.variable}`}><LeagueProvider><Nav/><main>{children}</main><footer><Shield size={18}/> LOBBY LEGENDS <span>·</span> Forged for the ten</footer></LeagueProvider></body></html>}

@@ -19,6 +19,7 @@ export function MatchForm({ match: initialMatch }: { match?: LobbyMatch }) {
   const [dire, setDire] = useState(match?.participants.filter(p => p.team === "dire").map(p => p.playerId) ?? Array<string>(5).fill(""));
   const [winner, setWinner] = useState<Team | "">(match?.winner ?? "");
   const [mvp, setMvp] = useState(match?.mvpPlayerId ?? "");
+  const [runnerUpMvp, setRunnerUpMvp] = useState(match?.runnerUpMvpPlayerId ?? "");
   const [rs, setRs] = useState(match?.radiantScore?.toString() ?? "");
   const [ds, setDs] = useState(match?.direScore?.toString() ?? "");
   const [duration, setDuration] = useState(match?.durationMinutes?.toString() ?? "");
@@ -34,13 +35,23 @@ export function MatchForm({ match: initialMatch }: { match?: LobbyMatch }) {
       ? list.map(id => ids.has(id) ? id : "") : list;
     setRadiant(prune); setDire(prune);
     setMvp(id => ids.has(id) ? id : "");
+    setRunnerUpMvp(id => ids.has(id) ? id : "");
   }, [store.players, store.hasSnapshot]);
   function clearDraft() {
     setRadiant(Array<string>(5).fill("")); setDire(Array<string>(5).fill(""));
-    setWinner(""); setMvp(""); setRs(""); setDs(""); setDuration("");
+    setWinner(""); setMvp(""); setRunnerUpMvp(""); setRs(""); setDs(""); setDuration("");
     setDotaId(""); setDate(""); setError("");
   }
   const selected = [...radiant, ...dire].filter(Boolean);
+  const winningIds = winner ? (winner === "radiant" ? radiant : dire) : [];
+  const losingIds = winner ? (winner === "radiant" ? dire : radiant) : [];
+  function changeWinner(next: Team | "") {
+    setWinner(next);
+    const winners = next ? (next === "radiant" ? radiant : dire) : [];
+    const losers = next ? (next === "radiant" ? dire : radiant) : [];
+    setMvp(id => winners.includes(id) ? id : "");
+    setRunnerUpMvp(id => losers.includes(id) ? id : "");
+  }
   function fail(message: string) {
     setError(message);
     requestAnimationFrame(() => errorRef.current?.focus());
@@ -49,6 +60,7 @@ export function MatchForm({ match: initialMatch }: { match?: LobbyMatch }) {
     const old = (team === "radiant" ? radiant : dire)[index];
     (team === "radiant" ? setRadiant : setDire)(list => list.map((id, i) => i === index ? value : id));
     if (mvp === old && old !== value) setMvp("");
+    if (runnerUpMvp === old && old !== value) setRunnerUpMvp("");
   }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -70,6 +82,7 @@ export function MatchForm({ match: initialMatch }: { match?: LobbyMatch }) {
       direScore: ds.trim() ? Number(ds) : undefined,
       durationMinutes: duration.trim() ? Number(duration) : undefined,
       mvpPlayerId: mvp || undefined,
+      runnerUpMvpPlayerId: runnerUpMvp || undefined,
       dotaMatchId: dotaId.trim() || undefined,
     };
     const issue = validateMatch(data, store.players);
@@ -96,8 +109,9 @@ export function MatchForm({ match: initialMatch }: { match?: LobbyMatch }) {
           </div>)}</div>
       </section>)}</div>
     <section className="panel" style={{marginTop:18}}><h2>Battle details</h2><div className="grid two-col">
-      <div className="field"><label htmlFor="winner">Winner *</label><select id="winner" value={winner} onChange={e => setWinner(e.target.value as Team | "")}><option value="">Choose the winner…</option><option value="radiant">Radiant</option><option value="dire">Dire</option></select></div>
-      <div className="field"><label htmlFor="mvp">MVP (optional)</label><select id="mvp" value={mvp} onChange={e => setMvp(e.target.value)}><option value="">No MVP selected</option>{store.players.filter(p => selected.includes(p.id)).map(p => <option key={p.id} value={p.id}>{p.nickname} · {p.name}</option>)}</select></div>
+      <div className="field"><label htmlFor="winner">Winner *</label><select id="winner" value={winner} onChange={e => changeWinner(e.target.value as Team | "")}><option value="">Choose the winner…</option><option value="radiant">Radiant</option><option value="dire">Dire</option></select></div>
+      <div className="field"><label htmlFor="mvp">MVP (optional)</label><select id="mvp" disabled={!winner} value={mvp} onChange={e => setMvp(e.target.value)}><option value="">No MVP selected</option>{mvp && !winningIds.includes(mvp) && <option value={mvp} disabled>Previous MVP · choose a winning player or clear</option>}{store.players.filter(p => winningIds.includes(p.id)).map(p => <option key={p.id} value={p.id}>{p.nickname} · {p.name}</option>)}</select></div>
+      <div className="field"><label htmlFor="runner-up-mvp">Runner-up MVP (optional)</label><select id="runner-up-mvp" disabled={!winner} value={runnerUpMvp} onChange={e => setRunnerUpMvp(e.target.value)}><option value="">No Runner-up MVP selected</option>{store.players.filter(p => losingIds.includes(p.id)).map(p => <option key={p.id} value={p.id}>{p.nickname} · {p.name}</option>)}</select><small className="muted">{winner ? "MVP recognizes the winner; Runner-up MVP recognizes the losing team." : "Choose the winner to select awards."}</small></div>
       <div className="field"><label htmlFor="radiant-score">Radiant score (optional)</label><input id="radiant-score" type="number" min="0" step="1" value={rs} onChange={e => setRs(e.target.value)}/></div>
       <div className="field"><label htmlFor="dire-score">Dire score (optional)</label><input id="dire-score" type="number" min="0" step="1" value={ds} onChange={e => setDs(e.target.value)}/></div>
       <div className="field"><label htmlFor="duration">Duration in minutes (optional)</label><input id="duration" type="number" min="0.01" step="any" value={duration} onChange={e => setDuration(e.target.value)}/></div>

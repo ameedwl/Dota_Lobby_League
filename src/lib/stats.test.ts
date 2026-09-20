@@ -211,3 +211,59 @@ describe("database mapping",()=>{
   });
 });
 
+
+describe("Runner-up MVP awards",()=>{
+  it("allows absent/null awards and either award independently",()=>{
+    for(const awards of [{}, {mvpPlayerId:null,runnerUpMvpPlayerId:null}, {mvpPlayerId:"p1"}, {runnerUpMvpPlayerId:"p6"}, {mvpPlayerId:"p1",runnerUpMvpPlayerId:"p6"}]) {
+      assert.equal(validateMatch({...game("a",1),...awards},players),null);
+    }
+  });
+  it("rejects wrong-team, duplicate and non-participant awards",()=>{
+    const a=game("a",1);
+    assert.match(validateMatch({...a,mvpPlayerId:"p6"},players)!,/winning/);
+    assert.match(validateMatch({...a,runnerUpMvpPlayerId:"p1"},players)!,/losing/);
+    assert.match(validateMatch({...a,mvpPlayerId:"p1",runnerUpMvpPlayerId:"p1"},players)!,/different/);
+    for(const id of ["new","missing",""]) {
+      assert.match(validateMatch({...a,runnerUpMvpPlayerId:id},players)!,/participating/);
+      assert.match(validateMatch({...a,mvpPlayerId:id},players)!,/participating/);
+    }
+    assert.ok(validateMatch({...a,winner:"dire",mvpPlayerId:"p1",runnerUpMvpPlayerId:"p6"},players));
+  });
+  it("derives counts after create/edit/delete without changing ranking",()=>{
+    const a={...game("a",1),mvpPlayerId:"p1",runnerUpMvpPlayerId:"p6"};
+    let data=applyLeagueAction({players,matches:[]},{type:"addMatch",match:a});
+    assert.equal(stat(data.matches,"p6").runnerUpMvpCount,1);
+    assert.equal(stat(data.matches,"p1").runnerUpMvpCount,0);
+    assert.equal(stat(data.matches,"new").runnerUpMvpCount,0);
+    assert.deepEqual(calculatePlayerStats(players,data.matches).map(s=>s.player.id),calculatePlayerStats(players,[game("a",1)]).map(s=>s.player.id));
+    data=applyLeagueAction(data,{type:"updateMatch",match:{...a,runnerUpMvpPlayerId:"p7"}});
+    assert.equal(stat(data.matches,"p6").runnerUpMvpCount,0);assert.equal(stat(data.matches,"p7").runnerUpMvpCount,1);
+    data=applyLeagueAction(data,{type:"deleteMatch",id:"a"});
+    assert.equal(stat(data.matches,"p7").runnerUpMvpCount,0);
+    assert.equal(stat([game("legacy",1)],"p6").runnerUpMvpCount,0);
+  });
+  it("uses the existing deterministic record tie order",()=>{
+    const matches=[{...game("a",1),runnerUpMvpPlayerId:"p6"},{...game("b",2),runnerUpMvpPlayerId:"p7"}];
+    const stats=calculatePlayerStats(players,matches);
+    const record=leagueRecords(stats).find(r=>r.key==="runnerUpMvpCount")!;
+    assert.equal(record.value,1);assert.deepEqual(record.holders.map(s=>s.player.id),["p6","p7"]);
+    assert.deepEqual(record,leagueRecords(calculatePlayerStats([...players].reverse(),[...matches].reverse())).find(r=>r.key==="runnerUpMvpCount"));
+  });
+  it("round-trips both awards and supports missing/null historical fields",()=>{
+    const rawPlayers=seedPlayers.map(p=>({...encodePlayer(p),created_at:p.createdAt}));
+    const a={...game("a",1),mvpPlayerId:"p1",runnerUpMvpPlayerId:"p6"};
+    const encoded=encodeMatch(a);assert.equal(encoded.runner_up_mvp_player_id,"p6");
+    const decode=(match:unknown)=>decodeSnapshot({players:rawPlayers,matches:[match],settings:null}).matches[0];
+    assert.equal(decode(encoded).runnerUpMvpPlayerId,"p6");
+    assert.equal(decode({...encoded,runner_up_mvp_player_id:null}).runnerUpMvpPlayerId,undefined);
+    const legacy=encodeMatch(game("legacy",1));
+    const {runner_up_mvp_player_id: omitted,...old}=legacy;
+    assert.equal(omitted,null);assert.equal(decode(old).runnerUpMvpPlayerId,undefined);
+    // Preserve an MVP assigned under the old rules on reads, but require correction on save.
+    const historical=decode({...old,mvp_player_id:"p6"});
+    assert.equal(historical.mvpPlayerId,"p6");assert.match(validateMatch(historical,players)!,/winning/);
+    assert.throws(()=>decode({...encoded,runner_up_mvp_player_id:"p1"}),/different/);
+    assert.throws(()=>decode({...encoded,runner_up_mvp_player_id:"new"}),/participating/);
+    assert.deepEqual(parseLeague(serializeLeague({players,matches:[a]})),{players,matches:[a]});
+  });
+});

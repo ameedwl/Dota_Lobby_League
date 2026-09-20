@@ -31,7 +31,20 @@ await test("Auth metadata cannot grant admin",async()=>{
 await db.query("update public.profiles set role='admin' where id=$1",[admin]);
 await test("database permits at most one admin",async()=>{await assert.rejects(db.query("update public.profiles set role='admin' where id=$1",[viewer]),code("23505"));});
 await db.exec(await readFile(new URL("../supabase/seed.sql",import.meta.url),"utf8"));
+// All setup and migrations below run only inside this ephemeral PGlite instance.
+const before=(await db.query("select public.league_snapshot() as value")).rows[0].value;
+const historical=before.matches[0];
+const historicalLoser=historical.participants.find(p=>p.team!==historical.winner_team).player_id;
+await db.query("update public.matches set mvp_player_id=$1 where id=$2",[historicalLoser,historical.id]);
+const populated=(await db.query("select public.league_snapshot() as value")).rows[0].value;
+await db.exec(await readFile(new URL("../supabase/migrations/202609200001_runner_up_mvp.sql",import.meta.url),"utf8"));
 const initial=(await db.query("select public.league_snapshot() as value")).rows[0].value;
+await test("forward migration preserves populated history, IDs, timestamps and legacy awards",async()=>{
+ assert.deepEqual({...initial,matches:initial.matches.map(m=>{const copy={...m};assert.equal(copy.runner_up_mvp_player_id,null);delete copy.runner_up_mvp_player_id;return copy;})},populated);
+});
+await test("historical losing-team MVP remains readable but must be corrected on edit",async()=>{
+ await assert.rejects(role(admin,tx=>tx.query("update public.matches set radiant_score=radiant_score where id=$1",[historical.id])),code("23514"));
+});
 const p=initial.players[0].id,m=initial.matches[0].id;
 for(const who of ["anon",viewer]){
  await test(who+" reads complete public league snapshot",async()=>{
@@ -102,9 +115,74 @@ await test("MVP outside participants rejected at commit",async()=>{
  const outsider=(await role(admin,tx=>tx.query("insert into public.players(name,nickname) values('Other','OTHER') returning id"))).rows[0].id;
  await assert.rejects(role(admin,tx=>tx.query("update public.matches set mvp_player_id=$1 where id=$2",[outsider,matchId])),code("23514"));
 });
+await test("both awards save, update, load publicly, and clear atomically",async()=>{
+ const base={...payload,mvp_player_id:payload.participants[0].player_id,runner_up_mvp_player_id:payload.participants[5].player_id};
+ for(const awards of [
+  {mvp_player_id:base.mvp_player_id,runner_up_mvp_player_id:base.runner_up_mvp_player_id},
+  {mvp_player_id:null,runner_up_mvp_player_id:base.runner_up_mvp_player_id},
+  {mvp_player_id:base.mvp_player_id,runner_up_mvp_player_id:null},
+  {mvp_player_id:null,runner_up_mvp_player_id:null},
+ ]){
+  const v=(await db.query("select updated_at::text as v from public.matches where id=$1",[matchId])).rows[0].v;
+  await role(admin,tx=>tx.query("select public.save_match($1,false,$2)",[{...base,...awards},v]));
+  const data=(await role("anon",tx=>tx.query("select public.league_snapshot() as value"))).rows[0].value;
+  const row=data.matches.find(m=>m.id===matchId);
+  assert.equal(row.mvp_player_id,awards.mvp_player_id);assert.equal(row.runner_up_mvp_player_id,awards.runner_up_mvp_player_id);
+ }
+});
+await test("create with both awards and delete work without orphaning history",async()=>{
+ const id="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+ await role(admin,tx=>tx.query("select public.save_match($1,true,null)",[{...payload,id,mvp_player_id:payload.participants[0].player_id,runner_up_mvp_player_id:payload.participants[5].player_id}]));
+ const row=(await db.query("select * from public.matches where id=$1",[id])).rows[0];
+ assert.equal(row.runner_up_mvp_player_id,payload.participants[5].player_id);
+ await role(admin,tx=>tx.query("delete from public.matches where id=$1",[id]));
+ assert.equal((await db.query("select * from public.match_players where match_id=$1",[id])).rows.length,0);
+});
+await test("direct table API and RPC reject wrong-team and same-player awards",async()=>{
+ for(const awards of [
+  {mvp_player_id:payload.participants[5].player_id},
+  {runner_up_mvp_player_id:payload.participants[0].player_id},
+  {mvp_player_id:payload.participants[0].player_id,runner_up_mvp_player_id:payload.participants[0].player_id},
+ ]){
+  const v=(await db.query("select updated_at::text as v from public.matches where id=$1",[matchId])).rows[0].v;
+  await assert.rejects(role(admin,tx=>tx.query("select public.save_match($1,false,$2)",[{...payload,...awards},v])),code("23514"));
+  await assert.rejects(role(admin,tx=>tx.query("update public.matches set mvp_player_id=$1,runner_up_mvp_player_id=$2 where id=$3",[awards.mvp_player_id??null,awards.runner_up_mvp_player_id??null,matchId])),code("23514"));
+ }
+});
+await test("Runner-up MVP must participate and foreign key protects player",async()=>{
+ const outsider=(await db.query("insert into public.players(name,nickname) values('Outside','OUT') returning id")).rows[0].id;
+ await assert.rejects(role(admin,tx=>tx.query("update public.matches set runner_up_mvp_player_id=$1 where id=$2",[outsider,matchId])),code("23514"));
+ await assert.rejects(role(admin,tx=>tx.query("update public.matches set runner_up_mvp_player_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' where id=$1",[matchId])),code("23503"));
+ await role(admin,tx=>tx.query("update public.matches set mvp_player_id=$1,runner_up_mvp_player_id=$2 where id=$3",[payload.participants[0].player_id,payload.participants[5].player_id,matchId]));
+ await assert.rejects(role(admin,tx=>tx.query("delete from public.players where id=$1",[payload.participants[5].player_id])),error=>["23503","23001"].includes(error.code));
+});
+await test("older clients omit Runner-up without erasing it, while explicit null clears",async()=>{
+ const v=(await db.query("select updated_at::text as v from public.matches where id=$1",[matchId])).rows[0].v;
+ await role(admin,tx=>tx.query("select public.save_match($1,false,$2)",[{...payload,mvp_player_id:payload.participants[0].player_id},v]));
+ assert.equal((await db.query("select runner_up_mvp_player_id from public.matches where id=$1",[matchId])).rows[0].runner_up_mvp_player_id,payload.participants[5].player_id);
+});
+await test("invalid award on create rolls back match and participants",async()=>{
+ const id="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+ await assert.rejects(role(admin,tx=>tx.query("select public.save_match($1,true,null)",[{...payload,id,runner_up_mvp_player_id:payload.participants[0].player_id}])),code("23514"));
+ assert.equal((await db.query("select * from public.matches where id=$1",[id])).rows.length,0);
+ assert.equal((await db.query("select * from public.match_players where match_id=$1",[id])).rows.length,0);
+});
+await test("winner and participation changes revalidate both awards at commit",async()=>{
+ await assert.rejects(role(admin,tx=>tx.query("update public.matches set winner_team='dire' where id=$1",[matchId])),code("23514"));
+ await assert.rejects(role(admin,tx=>tx.query("update public.match_players set team=case team when 'radiant' then 'dire' else 'radiant' end where match_id=$1",[matchId])),code("23514"));
+ // Deferred checks permit temporary invalidity when the final transaction is valid.
+ await role(admin,async tx=>{
+  await tx.query("update public.matches set winner_team='dire' where id=$1",[matchId]);
+  await tx.query("update public.matches set mvp_player_id=$1,runner_up_mvp_player_id=$2 where id=$3",[payload.participants[5].player_id,payload.participants[0].player_id,matchId]);
+ });
+});
 await test("admin deletes match and participation cascades",async()=>{
  assert.equal((await role(admin,tx=>tx.query("delete from public.matches where id=$1 returning id",[matchId]))).rows.length,1);
  assert.equal((await db.query("select count(*)::int as n from public.match_players where match_id=$1",[matchId])).rows[0].n,0);
+});
+await test("historical losing-team award does not block deleting its match",async()=>{
+ await role(admin,tx=>tx.query("delete from public.matches where id=$1",[historical.id]));
+ assert.equal((await db.query("select * from public.match_players where match_id=$1",[historical.id])).rows.length,0);
 });
 await test("admin edits league settings",async()=>{
  assert.equal((await role(admin,tx=>tx.query("update public.league_settings set season='Season II' where id=true returning season"))).rows[0].season,"Season II");

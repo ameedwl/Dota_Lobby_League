@@ -12,7 +12,7 @@ export function backendError(error: {code?: string; message?: string}): string {
   if ((error.code === "23503" || error.code === "23001")) return "This player is referenced by match history and cannot be deleted.";
   if (error.code === "23505") return "That record or Dota Match ID already exists.";
   if (error.code === "40001") return "This match changed in another session. Reload it before saving.";
-  if (error.code === "23514") return "Invalid match data. Check the teams, MVP, scores and duration.";
+  if (error.code === "23514") return "Invalid match data. Check the teams, MVP and Runner-up MVP awards, scores and duration.";
   return error.message || "The league service is unavailable. Please try again.";
 }
 

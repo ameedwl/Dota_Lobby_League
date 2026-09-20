@@ -22,3 +22,12 @@
 
 /* Authentication controls share the existing navigation treatment. */
 .nav-auth{background:none;border:0;color:var(--muted);padding:14px;font:600 14px var(--font-display);text-transform:uppercase;cursor:pointer}.nav .brand b{max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:1100px){.nav-admin .menu{display:block}.nav-admin nav{display:none;position:absolute;top:77px;left:0;right:0;height:auto;background:#0d0e10;border-bottom:1px solid #444;padding:10px}.nav-admin nav.open{display:grid}.nav-admin nav a{padding:13px;border:0}.nav-auth{text-align:left}}@media(max-width:800px){.nav-admin nav{top:65px}}
+
+/* Secondary match award: restrained silver beneath the primary MVP. */
+.match-awards{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.match-award{display:grid;gap:5px}
+.match-award small{text-transform:capitalize;font-size:12px}
+.badge.runner-up-award{color:#b9c1cd;background:#1c2027;border-color:#414954;font-weight:500}
+.versus .match-awards{justify-content:center}
+.records .record:nth-child(n+3){grid-column:span 3}
+@media(max-width:800px){.records .record:nth-child(n+3){grid-column:auto}}

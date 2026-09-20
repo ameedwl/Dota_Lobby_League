@@ -7,7 +7,7 @@ export type LeagueAction =
   | { type: "deleteMatch" | "deletePlayer"; id: string }
   | { type: "addPlayer" | "updatePlayer"; player: Player };
 
-export function validateLeague(data: LeagueData): string | null {
+export function validateLeague(data: LeagueData, options: { allowHistoricalMvp?: boolean } = {}): string | null {
   if (!data || !Array.isArray(data.players) || !Array.isArray(data.matches)) return "Invalid league data.";
   const ids = new Set<string>();
   for (const p of data.players) {
@@ -17,7 +17,7 @@ export function validateLeague(data: LeagueData): string | null {
   }
   const matchIds = new Set<string>(), dotaIds = new Set<string>();
   for (const m of data.matches) {
-    const issue = validateMatch(m, data.players);
+    const issue = validateMatch(m, data.players, options);
     if (issue) return issue;
     if (matchIds.has(m.id)) return "Duplicate match ID.";
     if (m.dotaMatchId && dotaIds.has(m.dotaMatchId)) return "This Dota Match ID is already recorded.";
@@ -45,7 +45,7 @@ export function applyLeagueAction(data: LeagueData, action: LeagueAction): Leagu
       if (!data.players.some(p => p.id === action.player.id)) throw new Error("Player no longer exists.");
       next = { ...data, players: data.players.map(p => p.id === action.player.id ? action.player : p) }; break;
     case "deletePlayer":
-      if (data.matches.some(m => m.participants.some(p => p.playerId === action.id) || m.mvpPlayerId === action.id)) throw new Error("Cannot delete a player referenced by match history.");
+      if (data.matches.some(m => m.participants.some(p => p.playerId === action.id) || m.mvpPlayerId === action.id || m.runnerUpMvpPlayerId === action.id)) throw new Error("Cannot delete a player referenced by match history.");
       if (!data.players.some(p => p.id === action.id)) throw new Error("Player no longer exists.");
       next = { ...data, players: data.players.filter(p => p.id !== action.id) }; break;
   }

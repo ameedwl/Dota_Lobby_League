@@ -16,3 +16,4 @@ require.extensions[".ts"] = (module, filename) => {
 require("../src/lib/stats.test.ts");
 
 
+require("../src/lib/screenshots.test.ts");

@@ -1,3 +1,4 @@
+import {testScreenshots} from "./test-screenshots-database.mjs";
 import {PGlite} from "@electric-sql/pglite";
 import {readFile} from "node:fs/promises";
 import assert from "node:assert/strict";
@@ -16,6 +17,12 @@ const code=(value)=>error=>error.code===value;
 try {
 await db.exec(`
  create role anon nologin; create role authenticated nologin;
+ create schema storage;
+ create table storage.buckets(id text primary key,name text not null,public boolean default false,file_size_limit bigint,allowed_mime_types text[]);
+ create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text references storage.buckets(id),name text not null,metadata jsonb default '{}',unique(bucket_id,name));
+ alter table storage.objects enable row level security;
+ grant usage on schema storage to anon,authenticated;
+ grant select,insert,update,delete on storage.objects to anon,authenticated;
  create schema auth;
  create table auth.users(id uuid primary key,raw_user_meta_data jsonb not null default '{}');
  create function auth.uid() returns uuid language sql stable as $$
@@ -38,6 +45,7 @@ const historicalLoser=historical.participants.find(p=>p.team!==historical.winner
 await db.query("update public.matches set mvp_player_id=$1 where id=$2",[historicalLoser,historical.id]);
 const populated=(await db.query("select public.league_snapshot() as value")).rows[0].value;
 await db.exec(await readFile(new URL("../supabase/migrations/202609200001_runner_up_mvp.sql",import.meta.url),"utf8"));
+await db.exec(await readFile(new URL("../supabase/migrations/202609210001_match_screenshots.sql",import.meta.url),"utf8"));
 const initial=(await db.query("select public.league_snapshot() as value")).rows[0].value;
 await test("forward migration preserves populated history, IDs, timestamps and legacy awards",async()=>{
  assert.deepEqual({...initial,matches:initial.matches.map(m=>{const copy={...m};assert.equal(copy.runner_up_mvp_player_id,null);delete copy.runner_up_mvp_player_id;return copy;})},populated);
@@ -187,9 +195,13 @@ await test("historical losing-team award does not block deleting its match",asyn
 await test("admin edits league settings",async()=>{
  assert.equal((await role(admin,tx=>tx.query("update public.league_settings set season='Season II' where id=true returning season"))).rows[0].season,"Season II");
 });
+await testScreenshots({db,role,test,admin,viewer,matchId:initial.matches[1].id});
 await test("role revocation immediately blocks database writes with same user identity",async()=>{
  await db.query("update public.profiles set role='viewer' where id=$1",[admin]);
  await assert.rejects(role(admin,tx=>tx.query("insert into public.players(name,nickname) values('No','NO')")),code("42501"));
+ const path=`matches/${initial.matches[2].id}/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png`;
+ await assert.rejects(role(admin,tx=>tx.query("insert into storage.objects(bucket_id,name) values('match-screenshots',$1)",[path])),code("42501"));
+ await assert.rejects(role(admin,tx=>tx.query("select public.prepare_screenshot_upload($1)",[path])),code("42501"));
 });
 console.log("\n"+passed+" database security/integrity checks passed (PostgreSQL via PGlite).");
 }finally{await db.close();}

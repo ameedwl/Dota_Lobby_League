@@ -8,18 +8,22 @@ global.requestAnimationFrame=fn=>fn();
 const React=require("react"),{act}=React,{createRoot}=require("react-dom/client");
 const rootPath=path.resolve(__dirname,"../src"),originalLoad=Module._load;
 let snapshot={players:Array.from({length:10},(_,i)=>({id:"p"+i,name:"Player "+i,nickname:"P"+i,createdAt:"2026-01-01"})),matches:[],settings:{name:"League",season:"I"}};
-let routeId="m1";
+let routeId="m1",sessionRole="admin";
+const screenshotMock=require("./screenshot-test-client.cjs")({getRole:()=>sessionRole,getMatches:()=>snapshot.matches});
+dom.window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute("open","");};
+dom.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute("open");};
 let authEvent,authFailure=false,readFailure=false,saveFailure=false,saved,pushed;
-const client={auth:{onAuthStateChange(fn){authEvent=fn;fn("INITIAL_SESSION");return {data:{subscription:{unsubscribe(){}}}};},async getUser(){return {data:{user:{id:"admin"}},error:authFailure?{message:"offline"}:null};}},
-from(){return {select(){return this;},eq(){return this;},async maybeSingle(){return {data:{role:"admin"},error:null};}}},
-async rpc(name,args){if(name==="league_snapshot")return {data:structuredClone(snapshot),error:readFailure?{message:"offline"}:null};saved=args;return {error:saveFailure?{message:"save failed"}:null};}};
+const client={auth:{onAuthStateChange(fn){authEvent=fn;fn("INITIAL_SESSION");return {data:{subscription:{unsubscribe(){}}}};},async getUser(){return {data:{user:sessionRole?{id:"admin"}:null},error:authFailure?{message:"offline"}:null};}},
+storage:screenshotMock.storage,
+from(table){if(table!=="profiles")return screenshotMock.from(table);return {select(){return this;},eq(){return this;},async maybeSingle(){return {data:{role:sessionRole},error:null};}}},
+async rpc(name,args){if(name==="prepare_screenshot_upload"||name==="discard_screenshot_upload"||name==="complete_screenshot_cleanup")return screenshotMock.rpc(name,args);if(name==="league_snapshot")return {data:structuredClone(snapshot),error:readFailure?{message:"offline"}:null};saved=args;return {error:saveFailure?{message:"save failed"}:null};}};
 const timers=new Map();let timerId=0;
 global.setInterval=(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;};
 global.clearInterval=id=>timers.delete(id);
 Module._load=function(id,parent,isMain){
  if(id==="next/navigation")return {useRouter:()=>({push:p=>pushed=p}),usePathname:()=>"/matches/new",useParams:()=>({id:routeId})};
  if(id==="next/link")return {__esModule:true,default:({children,...props})=>React.createElement("a",props,children)};
- if(id==="./supabase")return {getSupabase:()=>client,backendError:e=>e.message};
+ if(id==="./supabase"||id==="@/lib/supabase")return {getSupabase:()=>client,backendError:e=>e.message};
  if(id==="./backend")return {decodeSnapshot:s=>s,encodeMatch:m=>m,encodePlayer:p=>p};
  if(id.startsWith("@/"))id=path.join(rootPath,id.slice(2));
  return originalLoad.call(this,id,parent,isMain);
@@ -125,6 +129,60 @@ async function submit(){await settle(()=>document.querySelector("form").dispatch
  await fill("player-field-0","Unsaved name");await fill("player-field-1","Unsaved alias");await fill("player-field-2","12345");
  const playerDraft=values();await poll();await focus();assert.deepEqual(values(),playerDraft);
  console.log("PASS Player and league settings forms: unsaved values survive polling and focus.");
- await settle(()=>root.unmount());
-})().catch(e=>{console.error(e);process.exitCode=1;});
+ const screenshotMatchId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+ snapshot.matches=[{...match,id:screenshotMatchId}];await poll();routeId=screenshotMatchId;
+ const publicWrap=child=>h(AuthProvider,null,h(LeagueProvider,null,h(LeagueStatus,null,child)));
+ await settle(()=>root.render(publicWrap(h(DetailPage))));
+ const screenshotSection=()=>document.querySelector(".match-screenshots");
+ const choose=async files=>settle(()=>{const input=document.querySelector("#match-screenshot-files");Object.defineProperty(input,"files",{configurable:true,value:files});input.dispatchEvent(new Event("change",{bubbles:true}));});
+ const picture=(type="image/png",size=20)=>({name:"screenshot.png",type,size});
+ const click=async text=>settle(()=>[...screenshotSection().querySelectorAll("button")].find(b=>b.textContent===text||b.getAttribute("aria-label")===text).click());
+ assert.ok(screenshotSection().textContent.includes("0 / 3 screenshots"));assert.ok(screenshotSection().textContent.includes("No screenshots attached yet."));
+ assert.equal(document.querySelector("#match-screenshot-files").multiple,true);
+ let browsed=false;const fileInput=document.querySelector("#match-screenshot-files");fileInput.click=()=>{browsed=true;};
+ await settle(()=>document.querySelector(".screenshot-browse").click());assert.equal(browsed,true);
+ await choose([picture("image/gif")]);assert.ok(screenshotSection().textContent.includes("Unsupported file type"));
+ await choose([picture("image/png",10485761)]);assert.ok(screenshotSection().textContent.includes("10 MB or smaller"));
+ assert.equal(screenshotMock.state.uploads,0);
+ screenshotMock.state.hold=true;
+ await choose([picture()]);assert.ok(screenshotSection().textContent.includes("Uploading..."));
+ await choose([picture()]);assert.equal(screenshotMock.state.uploads,1);
+ screenshotMock.state.hold=false;await settle(()=>screenshotMock.state.release());
+ assert.ok(screenshotSection().textContent.includes("Upload complete"));assert.equal(document.querySelectorAll(".screenshot-card").length,1);
+ assert.equal(document.querySelector(".screenshot-thumbnail img").getAttribute("loading"),"lazy");
+ await settle(()=>{const event=new Event("drop",{bubbles:true,cancelable:true});Object.defineProperty(event,"dataTransfer",{value:{files:[picture("image/jpeg"),picture("image/webp")]}});document.querySelector(".screenshot-dropzone").dispatchEvent(event);});
+ assert.equal(document.querySelectorAll(".screenshot-card").length,3);assert.ok(screenshotSection().textContent.includes("3 / 3 screenshots"));
+ await choose([picture()]);assert.ok(screenshotSection().textContent.includes("up to 3"));assert.equal(screenshotMock.state.uploads,3);
+ let restoredScroll;window.scrollTo=(x,y)=>{restoredScroll=[x,y];};
+ Object.defineProperty(window,"scrollY",{configurable:true,value:240});
+ document.body.style.overflow="auto";document.documentElement.style.overflow="scroll";
+ await settle(()=>document.querySelector('[aria-label="Open screenshot 1"]').click());assert.ok(document.querySelector("dialog[open]"));
+ assert.equal(document.body.style.position,"fixed");assert.equal(document.body.style.top,"-240px");assert.equal(document.documentElement.style.overflow,"hidden");
+ await settle(()=>document.querySelector("dialog img").click());assert.ok(document.querySelector("dialog[open]"));
+ const key=async value=>settle(()=>document.querySelector("dialog").dispatchEvent(new dom.window.KeyboardEvent("keydown",{key:value,bubbles:true,cancelable:true})));
+ await key("ArrowLeft");assert.ok(document.querySelector("dialog h2").textContent.includes("3 / 3"));
+ await key("ArrowRight");assert.ok(document.querySelector("dialog h2").textContent.includes("1 / 3"));
 
+ await click("Next screenshot");assert.ok(document.querySelector("dialog h2").textContent.includes("2 / 3"));
+ await click("Previous screenshot");await click("Close preview");assert.equal(document.querySelector("dialog"),null);
+ assert.equal(document.body.style.overflow,"auto");assert.equal(document.body.style.position,"");assert.equal(document.documentElement.style.overflow,"scroll");assert.deepEqual(restoredScroll,[0,240]);
+ await settle(()=>document.querySelector('[aria-label="Open screenshot 1"]').click());await key("Escape");assert.equal(document.querySelector("dialog"),null);
+ await settle(()=>document.querySelector('[aria-label="Open screenshot 1"]').click());await settle(()=>document.querySelector("dialog").click());assert.equal(document.querySelector("dialog"),null);assert.equal(document.body.style.position,"");
+
+ await settle(()=>document.querySelector(".screenshot-thumbnail img").dispatchEvent(new Event("error")));assert.ok(screenshotSection().textContent.includes("Image unavailable"));
+ await click("Remove screenshot 1");await click("Cancel removal");assert.equal(document.querySelectorAll(".screenshot-card").length,3);
+ await click("Remove screenshot 1");await click("Confirm removal");assert.equal(document.querySelectorAll(".screenshot-card").length,2);assert.equal(screenshotMock.state.objects.size,2);
+ screenshotMock.state.failUpload=true;await choose([picture()]);assert.ok(screenshotSection().textContent.includes("Upload failed"));assert.equal(document.querySelectorAll(".screenshot-card").length,2);screenshotMock.state.failUpload=false;
+ screenshotMock.state.failInsert=true;await choose([picture()]);assert.equal(screenshotMock.state.objects.size,2);assert.equal(screenshotMock.state.rows.length,2);screenshotMock.state.failInsert=false;
+ screenshotMock.state.failRemove=true;await click("Remove screenshot 1");await click("Confirm removal");assert.ok(screenshotSection().textContent.includes("cleanup is queued"));assert.equal(document.querySelectorAll(".screenshot-card").length,1);
+ screenshotMock.state.failRemove=false;await poll();assert.equal(screenshotMock.state.pending.size,0);
+ sessionRole="viewer";await focus();assert.equal(document.querySelector(".screenshot-dropzone"),null);assert.ok(![...screenshotSection().querySelectorAll("button")].some(b=>b.textContent.startsWith("Remove screenshot")));
+ await settle(()=>document.querySelector('[aria-label="Open screenshot 1"]').click());assert.ok(document.querySelector("dialog[open]"));
+ await settle(()=>document.querySelector("dialog").dispatchEvent(new Event("cancel",{cancelable:true})));assert.equal(document.querySelector("dialog"),null);
+ sessionRole=null;await settle(()=>authEvent("SIGNED_OUT"));assert.equal(document.querySelector(".screenshot-dropzone"),null);assert.equal(document.querySelectorAll(".screenshot-card").length,1);
+ console.log("PASS Screenshots: public gallery/lightbox, admin controls, multi-file browse/drop, validation, duplicate guard, upload/removal states and cleanup retry.");
+ await settle(()=>document.querySelector('[aria-label="Open screenshot 1"]').click());
+ await settle(()=>root.unmount());
+ assert.equal(document.body.style.overflow,"auto");assert.equal(document.body.style.position,"");assert.equal(document.documentElement.style.overflow,"scroll");
+ console.log("PASS Fullscreen lightbox: arrow wrapping, Escape, backdrop/image clicks, scroll locking and restoration on close/unmount.");
+})().catch(e=>{console.error(e);process.exitCode=1;});

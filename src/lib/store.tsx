@@ -1,5 +1,6 @@
 "use client";
 import { createContext,useCallback,useContext,useEffect,useRef,useState } from "react";
+import { cleanupScreenshotFiles } from "./screenshots";
 import { LobbyMatch,Player } from "./types";
 import { LeagueData } from "./league";
 import { validateMatch } from "./stats";
@@ -39,6 +40,14 @@ export function LeagueProvider({children}:{children:React.ReactNode}){
   const interval=setInterval(()=>{if(document.visibilityState==="visible")void refresh();},15000);
   return ()=>{window.removeEventListener("focus",focus);clearInterval(interval);};
  },[refresh]);
+ // Retry queued object deletion even after navigating away from a deleted match.
+ useEffect(()=>{
+  if(!client||!auth.ready||!auth.isAdmin||auth.error)return;
+  const cleanup=()=>{void cleanupScreenshotFiles(client).catch(()=>{/* Durable queue retries on the next admin sync. */});};
+  cleanup();const interval=setInterval(()=>{if(document.visibilityState==="visible")cleanup();},15000);
+  window.addEventListener("focus",cleanup);
+  return()=>{clearInterval(interval);window.removeEventListener("focus",cleanup);};
+ },[client,auth.ready,auth.isAdmin,auth.error]);
  async function write(operation:()=>PromiseLike<{error:{message:string;code?:string}|null;data?:unknown}>,expectRow=false){
   if(!client||!auth.ready||!auth.isAdmin)return "Only the league administrator can make changes.";
   if(auth.error)return auth.error;
@@ -60,7 +69,7 @@ export function LeagueProvider({children}:{children:React.ReactNode}){
  };
  return <C.Provider value={{...data,settings,ready,hasSnapshot,error,refresh,
   addMatch:m=>saveMatch(m,true),updateMatch:m=>saveMatch(m,false),
-  deleteMatch:id=>write(()=>client!.from("matches").delete().eq("id",id).select("id"),true),
+  deleteMatch:async id=>{const issue=await write(()=>client!.from("matches").delete().eq("id",id).select("id"),true);if(!issue&&client)void cleanupScreenshotFiles(client).catch(()=>{});return issue;},
   addPlayer:p=>write(()=>client!.from("players").insert(encodePlayer(p)).select("id"),true),
   updatePlayer:p=>write(()=>client!.from("players").update(encodePlayer(p)).eq("id",p.id).select("id"),true),
   deletePlayer:id=>write(()=>client!.from("players").delete().eq("id",id).select("id"),true),

@@ -1,4 +1,5 @@
 "use client";
+import { LeagueHeroStats } from "@/components/hero-ui";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui";
 import { useLeague } from "@/lib/store";
@@ -15,6 +16,6 @@ export default function Page() {
       <article className="stat-card"><span>Average recorded duration</span><strong>{durations.length?Math.round(durations.reduce((a,b)=>a+b,0)/durations.length)+"m":"—"}</strong><small className="muted">{durations.length} matches with duration</small></article>
       <article className="stat-card radiant-stat"><span>Radiant wins</span><strong>{matches.filter(m=>m.winner==="radiant").length}</strong></article>
       <article className="stat-card dire-stat"><span>Dire wins</span><strong>{matches.filter(m=>m.winner==="dire").length}</strong></article>
-    </div></>;
+    </div><LeagueHeroStats matches={matches}/></>;
 }
 

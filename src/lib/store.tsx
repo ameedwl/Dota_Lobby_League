@@ -3,6 +3,7 @@ import { createContext,useCallback,useContext,useEffect,useRef,useState } from "
 import { cleanupScreenshotFiles } from "./screenshots";
 import { LobbyMatch,Player } from "./types";
 import { LeagueData } from "./league";
+import { existingDotaMatch, validDotaAccountId } from "./opendota";
 import { validateMatch } from "./stats";
 import { useAuth } from "./auth";
 import { backendError,getSupabase } from "./supabase";
@@ -63,15 +64,21 @@ export function LeagueProvider({children}:{children:React.ReactNode}){
   }catch(e){return backendError(e as {message:string;code?:string});}finally{busy.current=false;}
  }
  const saveMatch=(m:LobbyMatch,create:boolean)=>{
+  if(existingDotaMatch(data.matches,m.dotaMatchId??"",m.id))return Promise.resolve("This Dota match has already been imported.");
   const issue=validateMatch(m,data.players);
   if(issue)return Promise.resolve(issue);
   return write(()=>client!.rpc("save_match",{p_match:encodeMatch(m),p_create:create,p_expected_updated_at:m.updatedAt??null}));
  };
+ const savePlayer=(p:Player,create:boolean)=>{
+  if(p.dotaAccountId!==undefined&&!validDotaAccountId(p.dotaAccountId))return Promise.resolve("Enter a valid Dota Account ID (Steam32).");
+  if(p.dotaAccountId&&data.players.some(other=>other.id!==p.id&&other.dotaAccountId===p.dotaAccountId))return Promise.resolve("This Dota Account ID is already assigned to another player.");
+  return write(()=>create?client!.from("players").insert(encodePlayer(p)).select("id"):client!.from("players").update(encodePlayer(p)).eq("id",p.id).select("id"),true);
+ };
  return <C.Provider value={{...data,settings,ready,hasSnapshot,error,refresh,
   addMatch:m=>saveMatch(m,true),updateMatch:m=>saveMatch(m,false),
   deleteMatch:async id=>{const issue=await write(()=>client!.from("matches").delete().eq("id",id).select("id"),true);if(!issue&&client)void cleanupScreenshotFiles(client).catch(()=>{});return issue;},
-  addPlayer:p=>write(()=>client!.from("players").insert(encodePlayer(p)).select("id"),true),
-  updatePlayer:p=>write(()=>client!.from("players").update(encodePlayer(p)).eq("id",p.id).select("id"),true),
+  addPlayer:p=>savePlayer(p,true),
+  updatePlayer:p=>savePlayer(p,false),
   deletePlayer:id=>write(()=>client!.from("players").delete().eq("id",id).select("id"),true),
   updateSettings:s=>write(()=>client!.from("league_settings").update(s).eq("id",true).select("id"),true)
  }}>{children}</C.Provider>;

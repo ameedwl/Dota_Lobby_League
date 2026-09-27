@@ -1,3 +1,4 @@
+import { validDotaAccountId } from "./opendota";
 import { LobbyMatch, Player } from "./types";
 import { sortMatches, validateMatch } from "./stats";
 
@@ -9,10 +10,15 @@ export type LeagueAction =
 
 export function validateLeague(data: LeagueData, options: { allowHistoricalMvp?: boolean } = {}): string | null {
   if (!data || !Array.isArray(data.players) || !Array.isArray(data.matches)) return "Invalid league data.";
-  const ids = new Set<string>();
+  const ids = new Set<string>(), accounts = new Set<string>();
   for (const p of data.players) {
     if (!p || typeof p.id !== "string" || !p.id.trim() || ids.has(p.id) ||
         typeof p.name !== "string" || !p.name.trim() || typeof p.nickname !== "string" || !p.nickname.trim()) return "Players must have unique IDs, names and nicknames.";
+    if (p.dotaAccountId !== undefined) {
+      if (!validDotaAccountId(p.dotaAccountId)) return "Enter a valid Dota Account ID (Steam32).";
+      if (accounts.has(p.dotaAccountId)) return "This Dota Account ID is already assigned to another player.";
+      accounts.add(p.dotaAccountId);
+    }
     ids.add(p.id);
   }
   const matchIds = new Set<string>(), dotaIds = new Set<string>();

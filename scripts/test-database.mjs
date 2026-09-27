@@ -1,3 +1,5 @@
+import {migrateHeroes,testHeroes} from "./test-heroes-database.mjs";
+import {testOpenDota} from "./test-opendota-database.mjs";
 import {testScreenshots} from "./test-screenshots-database.mjs";
 import {PGlite} from "@electric-sql/pglite";
 import {readFile} from "node:fs/promises";
@@ -53,6 +55,7 @@ await test("forward migration preserves populated history, IDs, timestamps and l
 await test("historical losing-team MVP remains readable but must be corrected on edit",async()=>{
  await assert.rejects(role(admin,tx=>tx.query("update public.matches set radiant_score=radiant_score where id=$1",[historical.id])),code("23514"));
 });
+await migrateHeroes(db,test);
 const p=initial.players[0].id,m=initial.matches[0].id;
 for(const who of ["anon",viewer]){
  await test(who+" reads complete public league snapshot",async()=>{
@@ -195,6 +198,8 @@ await test("historical losing-team award does not block deleting its match",asyn
 await test("admin edits league settings",async()=>{
  assert.equal((await role(admin,tx=>tx.query("update public.league_settings set season='Season II' where id=true returning season"))).rows[0].season,"Season II");
 });
+await testOpenDota({db,role,test,admin,viewer});
+await testHeroes({db,role,test,admin,viewer,players:initial.players});
 await testScreenshots({db,role,test,admin,viewer,matchId:initial.matches[1].id});
 await test("role revocation immediately blocks database writes with same user identity",async()=>{
  await db.query("update public.profiles set role='viewer' where id=$1",[admin]);

@@ -13,9 +13,9 @@ const screenshotMock=require("./screenshot-test-client.cjs")({getRole:()=>sessio
 dom.window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute("open","");};
 dom.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute("open");};
 let authEvent,authFailure=false,readFailure=false,saveFailure=false,saved,pushed;
-const client={auth:{onAuthStateChange(fn){authEvent=fn;fn("INITIAL_SESSION");return {data:{subscription:{unsubscribe(){}}}};},async getUser(){return {data:{user:sessionRole?{id:"admin"}:null},error:authFailure?{message:"offline"}:null};}},
+const client={auth:{async getSession(){return {data:{session:sessionRole?{access_token:"test-session"}:null}};},onAuthStateChange(fn){authEvent=fn;fn("INITIAL_SESSION");return {data:{subscription:{unsubscribe(){}}}};},async getUser(){return {data:{user:sessionRole?{id:"admin"}:null},error:authFailure?{message:"offline"}:null};}},
 storage:screenshotMock.storage,
-from(table){if(table!=="profiles")return screenshotMock.from(table);return {select(){return this;},eq(){return this;},async maybeSingle(){return {data:{role:sessionRole},error:null};}}},
+from(table){if(table==="players"){let player;return {insert(p){player=p;return this;},update(p){player=p;return this;},eq(){return this;},async select(){if(sessionRole!=="admin")return {data:[],error:{message:"Only admin"}};snapshot.players=snapshot.players.some(p=>p.id===player.id)?snapshot.players.map(p=>p.id===player.id?player:p):[...snapshot.players,player];return {data:[{id:player.id}],error:null};}};}if(table!=="profiles")return screenshotMock.from(table);return {select(){return this;},eq(){return this;},async maybeSingle(){return {data:{role:sessionRole},error:null};}}},
 async rpc(name,args){if(name==="prepare_screenshot_upload"||name==="discard_screenshot_upload"||name==="complete_screenshot_cleanup")return screenshotMock.rpc(name,args);if(name==="league_snapshot")return {data:structuredClone(snapshot),error:readFailure?{message:"offline"}:null};saved=args;return {error:saveFailure?{message:"save failed"}:null};}};
 const timers=new Map();let timerId=0;
 global.setInterval=(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;};
@@ -39,7 +39,7 @@ const root=createRoot(document.getElementById("root"));
 const wrap=child=>h(AuthProvider,null,h(LeagueProvider,null,h(LeagueStatus,null,h(AdminGate,null,child))));
 async function settle(fn=()=>{}){await act(async()=>{await fn();await new Promise(r=>setTimeout(r,10));});}
 async function fill(id,value){await settle(()=>{const el=document.getElementById(id);Object.getOwnPropertyDescriptor(el instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype,"value").set.call(el,value);el.dispatchEvent(new Event(el instanceof HTMLSelectElement?"change":"input",{bubbles:true}));});}
-const values=()=>Object.fromEntries([...document.querySelectorAll("input,select")].map(el=>[el.id,el.value]));
+const values=()=>Object.fromEntries([...document.querySelectorAll("input:not([type=checkbox]),select")].map(el=>[el.id,el.value]));
 async function poll(){await settle(()=>{for(const t of timers.values())if(t.ms===15000)t.fn();});}
 async function focus(){await settle(()=>window.dispatchEvent(new Event("focus")));}
 async function submit(){await settle(()=>document.querySelector("form").dispatchEvent(new Event("submit",{bubbles:true,cancelable:true})));}
@@ -59,6 +59,77 @@ async function submit(){await settle(()=>document.querySelector("form").dispatch
  saveFailure=true;await submit();assert.deepEqual(values(),draft);saveFailure=false;
  await submit();assert.equal(saved.p_match.participants.length,10);assert.equal(saved.p_match.durationMinutes,38.5);assert.equal(saved.p_match.runnerUpMvpPlayerId,"p2");assert.ok(pushed);assert.ok(Object.values(values()).every(v=>v===""));
  console.log("PASS Add Match: all fields survive polling, focus, token refresh, errors; failed save preserves and successful save clears.");
+
+ const savedManual=saved,originalFetch=global.fetch;
+ const {parseOpenDotaMatch}=require("../src/lib/opendota");
+ snapshot.players=snapshot.players.map((p,i)=>({...p,dotaAccountId:String(100+i)}));await poll();
+ const imported=parseOpenDotaMatch({match_id:777777777,radiant_win:true,radiant_score:42,dire_score:31,duration:2322,start_time:1789900019,players:snapshot.players.map((p,i)=>({account_id:Number(p.dotaAccountId),player_slot:i<5?i:i+123}))},"777777777");
+ const press=async text=>settle(()=>[...document.querySelectorAll("button")].find(b=>b.textContent===text).click());
+ let imports=0;
+ global.fetch=async(url,options)=>{imports++;assert.equal(url,"/api/opendota/match/777777777");assert.equal(options.headers.Authorization,"Bearer test-session");return Response.json(imported);};
+ await settle(()=>root.render(wrap(h(MatchForm,{key:"import-test"}))));
+ await fill("radiant0","p0");await fill("dire0","p5");await fill("winner","dire");await fill("mvp","p5");await fill("runner-up-mvp","p0");await fill("duration","99");
+ await fill("import-dota-id","777777777");const manualBeforeFetch=values();
+ await press("Fetch Match");assert.equal(saved,savedManual);assert.equal(values().duration,"99");assert.equal(values().mvp,"p5");
+ assert.deepEqual(Array.from({length:10},(_,i)=>values()["import-slot-"+i]),snapshot.players.map(p=>p.id));
+ const previewDraft=values();await poll();await focus();assert.deepEqual(values(),previewDraft);
+ await press("Use this match data");assert.equal(saved,savedManual);assert.equal(values().winner,"radiant");assert.equal(values().duration,"38.7");assert.equal(values()["radiant-score"],"42");assert.equal(values()["dire-score"],"31");assert.equal(values()["dota-id"],"777777777");assert.equal(values().mvp,"");assert.equal(values()["runner-up-mvp"],"");
+ for(let i=0;i<5;i++){assert.equal(values()["radiant"+i],"p"+i);assert.equal(values()["dire"+i],"p"+(i+5));}
+ const importedDraft=values();await poll();await focus();assert.deepEqual(values(),importedDraft);
+ await fill("mvp","p1");await fill("runner-up-mvp","p6");await submit();
+ assert.equal(saved.p_match.playedAt,imported.playedAt);assert.equal(saved.p_match.mvpPlayerId,"p1");assert.equal(saved.p_match.runnerUpMvpPlayerId,"p6");assert.equal(saved.p_match.durationMinutes,38.7);
+ assert.ok(Object.values(values()).every(v=>v===""));
+ await settle(()=>root.render(wrap(h(MatchForm,{key:"import-errors"}))));await fill("duration","91");await fill("import-dota-id","bad");await press("Fetch Match");assert.equal(imports,1);assert.equal(values().duration,"91");
+ await fill("import-dota-id","777777777");const failedDraft=values();
+ global.fetch=async()=>{throw new Error("Network failure");};await press("Fetch Match");assert.deepEqual(values(),failedDraft);
+ global.fetch=async()=>Response.json({error:"This match was not found on OpenDota."},{status:404});await press("Fetch Match");assert.deepEqual(values(),failedDraft);
+ global.fetch=async()=>Response.json({...imported,participants:imported.participants.map((p,i)=>({...p,accountId:i===0?"999":i===1?null:p.accountId}))});
+ await press("Fetch Match");assert.equal(values()["import-slot-0"],"");assert.equal(values()["import-slot-1"],"");
+ await press("Use this match data");assert.equal(values().duration,"91");assert.ok(document.body.textContent.includes("Assign ten different"));
+ await fill("import-slot-0","p0");await fill("import-slot-1","p0");await press("Use this match data");assert.equal(values().duration,"91");
+ await fill("import-slot-1","p1");await press("Use this match data");assert.equal(values().duration,"38.7");
+ const latestSaved=saved;
+ snapshot.matches=[{...latestSaved.p_match,id:"existing-import"}];await poll();await submit();assert.equal(saved,latestSaved);assert.ok(document.body.textContent.includes("This Dota match has already been imported."));
+ await fill("import-dota-id","777777777");await press("Fetch Match");assert.ok(document.querySelector('a[href="/matches/existing-import"]'));
+ snapshot.matches=[];await poll();
+ let finishFetch;global.fetch=()=>new Promise(resolve=>{finishFetch=()=>resolve(Response.json(imported));});
+ await press("Fetch Match");assert.equal([...document.querySelectorAll("button")].find(b=>b.textContent==="Fetching match from OpenDota...").disabled,true);
+ await settle(()=>finishFetch());await press("Discard preview");assert.equal(values().duration,"38.7");
+ global.fetch=originalFetch;saved=savedManual;
+ assert.equal(manualBeforeFetch.duration,"99");
+ console.log("PASS OpenDota form: explicit confirmation, ten mappings, unknown/anonymous assignment, no automatic save, manual awards, duplicates, failures, loading, exact time, and polling/focus draft preservation.");
+
+ const beforeHeroSave=saved;
+ await settle(()=>root.render(wrap(h(MatchForm,{key:"hero-manual"}))));
+ global.fetch=async()=>{throw new Error("OpenDota unavailable");};await fill("import-dota-id","777777777");await press("Fetch Match");
+ for(let i=0;i<5;i++){await fill("radiant"+i,"p"+i);await fill("dire"+i,"p"+(i+5));}
+ await fill("winner","radiant");await fill("mvp","p0");await fill("runner-up-mvp","p5");
+ await settle(()=>document.getElementById("record-heroes").click());
+ await fill("radiant-hero-0-search","mag");assert.ok([...document.querySelectorAll("#radiant-hero-0 option")].some(o=>o.textContent==="Magnus"));
+ await fill("radiant-hero-0", "1");await submit();assert.equal(saved,beforeHeroSave);assert.ok(document.body.textContent.includes("all ten"));
+ for(let i=0;i<5;i++){await fill("radiant-hero-"+i,String(i+1));await fill("dire-hero-"+i,String(i+6));}
+ await press("Add radiant ban");await fill("ban-0","11");await press("Add dire ban");await fill("ban-1","11");
+ await submit();assert.equal(saved,beforeHeroSave);assert.ok(document.body.textContent.includes("only be banned once"));
+ await fill("ban-1","1");await submit();assert.ok(document.body.textContent.includes("also be played"));
+ await fill("ban-1","12");const heroesDraft=values();await poll();await focus();assert.deepEqual(values(),heroesDraft);assert.equal(document.getElementById("record-heroes").checked,true);
+ await submit();assert.deepEqual(saved.p_match.participants.map(p=>p.heroId),[1,2,3,4,5,6,7,8,9,10]);assert.equal(saved.p_match.bans.length,2);
+ const heroMatch={...saved.p_match,id:"hero-match",updatedAt:"hero-version"};
+ await settle(()=>root.render(wrap(h(MatchForm,{key:"hero-edit",match:heroMatch}))));assert.equal(values()["radiant-hero-0"],"1");assert.equal(values()["ban-0"],"11");
+ await fill("radiant-hero-0","13");await press("Remove");
+ const editedHeroDraft=values();await poll();await focus();assert.deepEqual(values(),editedHeroDraft);
+ await submit();assert.equal(saved.p_match.participants[0].heroId,13);assert.equal(saved.p_match.bans.length,1);assert.equal(saved.p_match.mvpPlayerId,"p0");assert.equal(saved.p_match.runnerUpMvpPlayerId,"p5");
+ await settle(()=>root.render(wrap(h(MatchForm,{key:"hero-clear",match:heroMatch}))));await settle(()=>document.getElementById("record-heroes").click());await submit();assert.ok(saved.p_match.participants.every(p=>p.heroId===null));
+ await settle(()=>root.render(wrap(h(MatchForm,{key:"hero-import"}))));
+ global.fetch=async()=>Response.json({...imported,participants:imported.participants.map((p,i)=>({...p,heroId:i+1})),bans:[{team:"dire",heroId:12}]});
+ await fill("import-dota-id","777777777");await press("Fetch Match");assert.ok(document.querySelector('[aria-label="Import Dota match"]').textContent.includes("Anti-Mage"));
+ await press("Use this match data");assert.equal(document.getElementById("record-heroes").checked,true);assert.equal(values()["dire-hero-4"],"10");assert.equal(values()["ban-0"],"12");
+ await fill("dire-hero-4","13");const correctedImport=values();await poll();await focus();assert.deepEqual(values(),correctedImport);
+ snapshot.matches=[heroMatch];routeId=heroMatch.id;await poll();
+ await settle(()=>root.render(wrap(h(require("../src/app/matches/[id]/page").default))));assert.ok(document.body.textContent.includes("Anti-Mage"));assert.ok(document.body.textContent.includes("Draft / Bans"));
+ await settle(()=>root.render(wrap(h(require("../src/app/stats/page").default))));assert.ok(document.body.textContent.includes("Most Picked Heroes"));assert.ok(document.body.textContent.includes("1 matches with complete hero data"));
+ routeId="p0";await settle(()=>root.render(wrap(h(require("../src/app/players/[id]/page").default))));assert.ok(document.body.textContent.includes("Hero Stats"));assert.ok(document.body.textContent.includes("Anti-Mage"));
+ snapshot.matches=[];routeId="m1";saved=beforeHeroSave;global.fetch=originalFetch;
+ console.log("PASS Heroes: offline manual entry, searchable catalog, complete/duplicate/conflict validation, bans, edit/remove, OpenDota preview/correction, hero displays and polling/focus preservation.");
  await settle(()=>root.render(wrap(h(MatchForm,{key:"new-draft"}))));
  await fill("radiant0","p0");await fill("dire0","p5");await fill("winner","radiant");await fill("mvp","p0");await fill("runner-up-mvp","p5");await fill("duration","21");
  snapshot.players=snapshot.players.filter(p=>p.id!=="p0");await poll();
@@ -126,8 +197,19 @@ async function submit(){await settle(()=>document.querySelector("form").dispatch
  await settle(()=>root.render(wrap(h(PlayersPage))));
  await settle(()=>[...document.querySelectorAll("button")].find(b=>b.textContent.includes("Add player")).click());
  const inputs=[...document.querySelectorAll("form input")];inputs.forEach((el,i)=>el.id="player-field-"+i);
- await fill("player-field-0","Unsaved name");await fill("player-field-1","Unsaved alias");await fill("player-field-2","12345");
+ await fill("player-field-0","Unsaved name");await fill("player-field-1","Unsaved alias");await fill("player-field-2","12345");await fill("player-field-3","987654321");
  const playerDraft=values();await poll();await focus();assert.deepEqual(values(),playerDraft);
+
+ await fill("player-field-3","102");await submit();assert.ok(document.body.textContent.includes("already assigned"));
+ await fill("player-field-3","987654321");await submit();assert.equal(snapshot.players.find(p=>p.nickname==="UNSAVED ALIAS").dotaAccountId,"987654321");
+ snapshot.players=snapshot.players.filter(p=>p.nickname!=="UNSAVED ALIAS");await poll();
+ sessionRole="viewer";await focus();
+ await settle(()=>root.render(h(AuthProvider,null,h(LeagueProvider,null,h(PlayersPage)))));
+ assert.equal(document.getElementById("player-dota-account"),null);assert.equal(document.querySelector(".player-management"),null);
+ await settle(()=>root.render(h(AuthProvider,null,h(LeagueProvider,null,h(MatchForm)))));
+ assert.equal(document.getElementById("import-dota-id"),null);assert.ok(!document.body.textContent.includes("Fetch Match"));
+ sessionRole="admin";await focus();
+ console.log("PASS Admin can save Dota Account IDs, duplicate mappings are rejected, and viewer sees no account/import controls.");
  console.log("PASS Player and league settings forms: unsaved values survive polling and focus.");
  const screenshotMatchId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
  snapshot.matches=[{...match,id:screenshotMatchId}];await poll();routeId=screenshotMatchId;

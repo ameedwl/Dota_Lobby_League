@@ -45,3 +45,6 @@
 @media(max-width:600px){.screenshot-preview-content img{max-width:95vw;max-height:min(90dvh,calc(100dvh - 152px))}.screenshot-counter{font-size:15px;top:max(24px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left))}.screenshot-close{padding:10px;font-size:12px}.screenshot-previous,.screenshot-next{top:auto;bottom:max(12px,env(safe-area-inset-bottom));translate:none;min-height:48px}}
 @media(max-width:800px){.screenshot-gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:480px){.screenshot-gallery{grid-template-columns:1fr}.screenshot-dropzone{padding:14px}}
+
+/* Optional hero data uses existing field and table styling. */
+.hero-label{display:inline-block;padding:3px 8px;border:1px solid var(--line);background:#14191b;color:var(--text);font-size:14px;margin:2px 6px 2px 0}.team-roster .hero-label{display:block;width:fit-content}.hero-selector{margin-top:10px;min-width:0}.hero-selector input{margin-bottom:6px}.hero-toggle{display:flex;align-items:center;gap:10px}.hero-toggle input{width:18px;height:18px}.ban-row{display:flex;align-items:end;gap:8px;margin-bottom:12px}.ban-row .hero-selector{flex:1}.ban-row .filter{margin-bottom:2px}

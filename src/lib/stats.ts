@@ -1,3 +1,4 @@
+import { validateHeroData } from "./heroes";
 import { LobbyMatch, Player, PlayerStats } from "./types";
 
 export const MIN_GAMES_FOR_RATE = 5;
@@ -59,6 +60,7 @@ export function validateMatch(match: LobbyMatch, players?: Player[], options: { 
   }
   if (match.durationMinutes !== undefined && (typeof match.durationMinutes !== "number" || !Number.isFinite(match.durationMinutes) || match.durationMinutes <= 0)) return "Duration must be a positive number of minutes.";
   if (match.dotaMatchId !== undefined && (typeof match.dotaMatchId !== "string" || !/^\d+$/.test(match.dotaMatchId))) return "Dota Match ID must contain digits only.";
+  if (!options.allowHistoricalMvp) { const issue = validateHeroData(match); if (issue) return issue; }
   return null;
 }
 export function opponentRecords(id: string, players: Player[], matches: LobbyMatch[]) {

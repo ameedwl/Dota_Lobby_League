@@ -48,3 +48,7 @@
 
 /* Optional hero data uses existing field and table styling. */
 .hero-label{display:inline-block;padding:3px 8px;border:1px solid var(--line);background:#14191b;color:var(--text);font-size:14px;margin:2px 6px 2px 0}.team-roster .hero-label{display:block;width:fit-content}.hero-selector{margin-top:10px;min-width:0}.hero-selector input{margin-bottom:6px}.hero-toggle{display:flex;align-items:center;gap:10px}.hero-toggle input{width:18px;height:18px}.ban-row{display:flex;align-items:end;gap:8px;margin-bottom:12px}.ban-row .hero-selector{flex:1}.ban-row .filter{margin-bottom:2px}
+
+/* Decorative viewport canvas; below navigation and native modal top layer. */
+.lobby-wraith-effect{position:fixed;inset:0;width:100%;height:100%;z-index:20;pointer-events:none;overflow:hidden;contain:strict}
+@media(prefers-reduced-motion:reduce){.lobby-wraith-effect{display:none}}

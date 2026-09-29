@@ -20,3 +20,4 @@ require("../src/lib/screenshots.test.ts");
 require("../src/lib/opendota.test.ts");
 
 require("../src/lib/heroes.test.ts");
+require("../src/lib/wraith.test.ts");

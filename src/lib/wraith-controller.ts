@@ -1,3 +1,5 @@
+import { makeWraithBattle, drawWraithBattle, type WraithBattle } from "./wraith-battle";
+import { SIZE_HISTORY_LENGTH, selectWeightedEvent, type WraithEventKind } from "./wraith-size";
 import { makeWraithRoute, wraithDelay, type WraithRoute } from "./wraith-path";
 import { drawWraith } from "./wraith-render";
 
@@ -5,33 +7,41 @@ export function startWraith(canvas: HTMLCanvasElement, win: Window, doc: Documen
   const context = canvas.getContext("2d");
   if (!context) return () => {};
   const ctx = context;
+  const eventHistory: WraithEventKind[] = [];
   const motion = win.matchMedia("(prefers-reduced-motion: reduce)");
   let timer: number | undefined, frame: number | undefined, route: WraithRoute | undefined;
+  let battle: WraithBattle | undefined;
   let width = 0, height = 0, start: number | undefined, stopped = false;
   const allowed = () => !stopped && !motion.matches && !doc.hidden;
   const clear = () => ctx.clearRect(0, 0, width, height);
   function cancel() {
     if (timer !== undefined) win.clearTimeout(timer);
     if (frame !== undefined) win.cancelAnimationFrame(frame);
-    timer = undefined; frame = undefined; route = undefined; start = undefined; clear();
+    timer = undefined; frame = undefined; route = undefined; battle = undefined; start = undefined; clear();
   }
   function schedule() {
-    if (!allowed() || timer !== undefined || route) return;
+    if (!allowed() || timer !== undefined || route || battle) return;
     timer = win.setTimeout(() => {
       timer = undefined;
       if (!allowed()) return;
-      route = makeWraithRoute(width, height); start = undefined;
+      const event = selectWeightedEvent(eventHistory);
+      eventHistory.push(event);
+      if (eventHistory.length > SIZE_HISTORY_LENGTH) eventHistory.shift();
+      if (event === "battle") battle = makeWraithBattle(width, height);
+      else route = makeWraithRoute(width, height, Math.random, [], event);
+      start = undefined;
       frame = win.requestAnimationFrame(tick);
     }, wraithDelay());
   }
   function tick(now: number) {
     frame = undefined;
-    if (!allowed() || !route) { cancel(); return; }
+    if (!allowed() || (!route && !battle)) { cancel(); return; }
     start ??= now;
-    const progress = (now - start) / route.duration;
+    const progress = (now - start) / (battle?.duration ?? route!.duration);
     clear();
-    if (progress >= 1) { route = undefined; start = undefined; schedule(); return; }
-    drawWraith(ctx, route, progress);
+    if (progress >= 1) { battle = undefined; route = undefined; start = undefined; schedule(); return; }
+    if (battle) drawWraithBattle(ctx, battle, progress);
+    else if (route) drawWraith(ctx, route, progress);
     frame = win.requestAnimationFrame(tick);
   }
   function resize() {

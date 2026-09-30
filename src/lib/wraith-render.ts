@@ -38,16 +38,18 @@ function largeDisturbance(ctx: CanvasRenderingContext2D, route: WraithRoute, pos
 }
 
 // Original vector geometry, drawn independently at each articulated joint.
-export function drawWraith(ctx: CanvasRenderingContext2D, route: WraithRoute, progress: number) {
-  const pose = wraithPose(route, progress), dire = route.variant === "dire", time = progress * route.duration / 1000;
+export function drawWraith(ctx: CanvasRenderingContext2D, route: WraithRoute, progress: number, battle?: { pose: ReturnType<typeof wraithPose>; death: number }) {
+  const pose = battle?.pose ?? wraithPose(route, progress), dire = route.variant === "dire", time = progress * route.duration / 1000;
   const energy = dire ? "#b82c45" : "#dfbd70", light = dire ? "#ff9b56" : "#a0edec";
-  if (route.size === "large") largeDisturbance(ctx, route, pose, progress);
+  if (!battle && route.size === "large") largeDisturbance(ctx, route, pose, progress);
   ctx.save();
-  ctx.globalAlpha = 0.72 * Math.min(1, progress * 12, (1 - progress) * 12);
+  ctx.globalAlpha = (1 - (battle?.death ?? 0)) * 0.72 * Math.min(1, progress * 12, (1 - progress) * 12);
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   // A faint spine ties the floating plates together, without a full-screen blur.
+  if (!battle?.death) {
   ctx.beginPath(); pose.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
   ctx.strokeStyle = energy; ctx.lineWidth = 5 * route.scale; ctx.shadowColor = energy; ctx.shadowBlur = 10 * route.multiplier; ctx.stroke(); ctx.shadowBlur = 0;
+  }
   for (let i = pose.length - 1; i >= 0; i--) {
     const p = pose[i], taper = 1 - i / pose.length, s = route.scale * (0.22 + 0.78 * taper);
     const pulse = (Math.sin(time * (dire ? 5 : 2.5) - i * 0.48) + 1) / 2;
@@ -94,7 +96,7 @@ export function drawWraith(ctx: CanvasRenderingContext2D, route: WraithRoute, pr
     const drift = (8 + age * 34) * route.scale * side;
     const x = anchor.x - Math.sin(anchor.angle) * drift - Math.cos(anchor.angle) * age * 18;
     const y = anchor.y + Math.cos(anchor.angle) * drift + Math.sin(time + i) * 5 * route.scale;
-    ctx.globalAlpha = (1 - age) * 0.35 * Math.min(1, progress * 12, (1 - progress) * 12);
+    ctx.globalAlpha = (1 - (battle?.death ?? 0)) * (1 - age) * 0.35 * Math.min(1, progress * 12, (1 - progress) * 12);
     ctx.fillStyle = dire ? (i % 3 ? light : "#873847") : (i % 3 ? energy : light);
     ctx.beginPath();
     if (dire && i % 3 === 0) ctx.ellipse(x, y, 6 * age * route.multiplier, 10 * age * route.multiplier, -0.4, 0, Math.PI * 2);

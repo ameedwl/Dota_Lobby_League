@@ -1,3 +1,4 @@
+import { selectWeightedSize } from "./wraith-size";
 export type WraithVariant = "radiant" | "dire";
 export type WraithSize = "small" | "medium" | "large";
 export type Point = { x: number; y: number };
@@ -8,33 +9,43 @@ export type WraithRoute = {
 export const wraithDelay = (random = Math.random) => 8000 + random() * 14000;
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 
-export function makeWraithRoute(width: number, height: number, random = Math.random): WraithRoute {
+export function makeWraithRoute(width: number, height: number, random = Math.random, history: readonly WraithSize[] = [], selectedSize?: WraithSize): WraithRoute {
   const variant: WraithVariant = random() < 0.5 ? "dire" : "radiant";
-  const roll = random(), size: WraithSize = roll < 0.45 ? "small" : roll < 0.8 ? "medium" : "large";
+  const size = selectedSize ?? selectWeightedSize(history, random);
   const mobile = width < 700;
   const multiplier = size === "small" ? 1 : size === "medium" ? (mobile ? 1.5 : 1.85) : (mobile ? 2.15 : 3);
   const scale = (mobile ? 0.56 : Math.min(1.12, Math.max(0.78, width / 1440))) * multiplier;
   const particles = mobile ? (size === "small" ? 7 : size === "medium" ? 9 : 12) : (size === "small" ? 15 : size === "medium" ? 19 : 26);
   const segments = mobile ? 17 : 25, spacing = 12 * scale;
-  const margin = size === "small" ? segments * spacing + 90 : 90 + 60 * scale;
-  const edge = (side: number): Point => {
-    const fraction = 0.12 + random() * 0.76;
-    return side === 0 ? { x: -margin, y: height * fraction } : side === 1 ? { x: width + margin, y: height * fraction }
-      : side === 2 ? { x: width * fraction, y: -margin } : { x: width * fraction, y: height + margin };
-  };
-  const entry = Math.floor(random() * 4), exit = size === "large" ? entry ^ 1 : (entry + 1 + Math.floor(random() * 3)) % 4;
-  const start = edge(entry), end = edge(exit);
-  const c1 = { x: width * (0.15 + random() * 0.7), y: height * (0.15 + random() * 0.7) };
-  const c2 = { x: width * (0.15 + random() * 0.7), y: height * (0.15 + random() * 0.7) };
-  const angle = Math.atan2(end.y - start.y, end.x - start.x), seed = random() * Math.PI * 2;
-  const amplitude = Math.min(width, height) * (variant === "dire" ? 0.1 : 0.16);
+  // Always cross an opposite edge. Prefer the long axis when the body is large
+  // relative to the short dimension, but retain both directions on roomy screens.
+  const aspect = width / height, bodyLength = (segments - 1) * spacing;
+  const preferHorizontal = aspect >= 1;
+  const longAxisChance = size === "large" && bodyLength > Math.min(width, height) * 0.6 ? 1 : 0.8;
+  const horizontal = Math.abs(Math.log(aspect)) < 0.15 ? random() < 0.5 : (random() < longAxisChance ? preferHorizontal : !preferHorizontal);
+  const major = horizontal ? width : height, cross = horizontal ? height : width;
+  // Head/horns + glow clearance. Tail extends outside along the entry tangent;
+  // the overscan need not include the entire body (formerly excessive on phones).
+  const margin = Math.max(45, 62 * scale);
+  const inset = Math.min(cross * 0.3, Math.max(cross * (size === "small" ? 0.06 : size === "medium" ? 0.13 : 0.21), scale * 24));
+  const span = cross - 2 * inset;
+  const reverse = random() < 0.5;
+  const entry = horizontal ? (reverse ? 1 : 0) : (reverse ? 3 : 2), exit = entry ^ 1;
+  const crossPoint = () => inset + span * (0.16 + random() * 0.68);
+  const a = crossPoint(), b = crossPoint(), c = crossPoint(), d = crossPoint();
+  const seed = random() * Math.PI * 2;
+  const amplitude = span * (variant === "dire" ? 0.1 : 0.15);
   const points: Point[] = [], distances = [0];
   for (let i = 0; i <= 640; i++) {
     const t = i / 640, u = 1 - t;
     // Zero displacement/derivative at the edges; Dire has shorter, tighter waves.
     const wave = Math.sin(Math.PI * t) ** 2 * Math.sin(t * Math.PI * (variant === "dire" ? 5 : 2) + seed) * amplitude;
-    const p = { x: u ** 3 * start.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t ** 3 * end.x - Math.sin(angle) * wave,
-      y: u ** 3 * start.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t ** 3 * end.y + Math.cos(angle) * wave };
+    // Convex cross-axis control points plus bounded waves stay inside the safe
+    // corridor. Monotone major-axis travel guarantees an actual head crossing.
+    const along = -margin + (major + margin * 2) * t;
+    const across = u ** 3 * a + 3 * u * u * t * b + 3 * u * t * t * c + t ** 3 * d + wave;
+    const position = reverse ? major - along : along;
+    const p = horizontal ? { x: position, y: across } : { x: across, y: position };
     if (i) distances.push(distances[i - 1] + Math.hypot(p.x - points[i - 1].x, p.y - points[i - 1].y));
     points.push(p);
   }

@@ -1,92 +1,77 @@
-# Lobby Wraith visual effect
+# Wraith responsive paths and adaptive sizes
 
-## Design
+## Scope
 
-- **Dire:** a dark split-horn mask, angular crimson vertebral armor, orange eye slits and etched chevrons. The tail tapers into fine bones, with a few embers and faint smoke motes. Shorter route waves, slightly faster travel and quicker energy pulses give it a sharper personality without frame-to-frame jitter.
-- **Radiant:** an elongated lantern crest, swept crescent horns, curved spectral plates and occasional open rune rings. Gold outlines, pale cyan energy and small floating diamond sparks accompany wider, calmer curves and slower pulses. Its head and plate geometry differ from Dire, not just its colors.
-- Both are original procedural canvas drawings. No character artwork, assets, dependencies or mouse-following behavior were added.
+The Radiant/Dire artwork, segmented sampling, particles, glow, Large dust/entry effects, scale multipliers, global canvas, pointer-events protection and reduced-motion behavior are unchanged. This refinement changes route generation and size choice only. No business logic, database, authentication or other feature was edited.
 
-## Motion and timing
+## Visibility diagnosis and correction
 
-Each event independently chooses Dire when `Math.random() < 0.5`, otherwise Radiant. Repeated appearances of the same variant are possible; there is no forced alternation.
+The previous generator selected edges without considering aspect ratio. Small/Medium could enter and exit nearby adjacent edges; their offscreen endpoints could keep much of the cubic curve outside the screen even when its control points were inside. Small overscan also included the whole body length, which spent too much of a phone-sized event offscreen. There was no visible-crossing invariant. These are code-level causes; the exact user's unseen event could not be replayed.
 
-Entry and exit edges, edge positions, curve control points, wave phase and duration vary per event. A cubic route plus a smooth, variant-specific lateral wave is sampled into an arc-length lookup table. The head advances along that table; successive segments sample increasingly older positions at fixed distance offsets. Each segment rotates along its local tangent, letting bends travel through the body rather than moving it as one image.
+Routes now use the canvas's current width/height and choose opposite edges. Longitudinal movement is monotone from outside one edge to beyond the opposite edge, guaranteeing the head crosses the screen rather than just a tail/glow fragment. Across the other axis, randomized cubic control points plus the existing faction-specific waves stay within a bounded interior corridor. Random offsets, direction, control points and phase retain diagonals, bends and edge skims without sending every route through the exact center.
 
-The route starts and ends beyond the viewport. Negative-distance samples extend the entry tangent for the trailing body. The head continues beyond the endpoint until every tail segment has exited, then the canvas is cleared.
+### Aspect ratio
 
-- First appearance: random **8–22 second** delay.
-- Later appearances: a new independent **8–22 second** wait after the previous event ends.
-- Event duration: Small **4.8–8 seconds**, Medium **5.52–9.2 seconds**, Large **6.72–11.2 seconds**, varying with route length, speed choice and variant; this includes offscreen approach/departure.
-- Desktop: 25 articulated segments, around 300 CSS pixels of body length for Small at a 1440px viewport.
-- Narrow screens: 17 segments at reduced scale, with 7/9/12 steady particles instead of desktop 15/19/26. The same occasional timing is retained.
+- Wide viewports prefer horizontal travel; portrait viewports prefer vertical travel, with an 80% long-axis preference.
+- Nearly square viewports (absolute log aspect ratio below 0.15) choose either axis equally.
+- On non-square viewports, Large uses the long axis whenever its body length exceeds 60% of the shorter dimension. Otherwise it keeps the 80% preference.
+- No user-agent checks or device-specific size probabilities are used.
 
-## Global mounting and performance
+### Size-aware bounds
 
-`LobbyWraithEffect` is mounted once in `src/app/layout.tsx`, outside the auth/league providers. It persists through normal App Router navigation and does not subscribe to league or form state.
+The cross-axis inset is the larger of 24 × actual visual scale and a fraction of the available cross dimension: Small 6%, Medium 13%, Large 21%, capped at 30% on tight screens. Control points lie between 16% and 84% of the remaining corridor; waves use at most 15% of that corridor. This leaves Small room to skim edges, puts Medium farther inside and keeps Large's centerline clearly visible.
 
-The fixed transparent canvas uses `pointer-events: none`, `aria-hidden`, no focus stop, no layout space and z-index 20, below navigation (30) and native modal dialogs. It never modifies page scroll styles or listens to mouse/touch input.
+Entry/exit overscan is max(45px, 62 × visual scale), allowing room for the head/horns and glow. It no longer includes the entire body length. Segments start farther back along the extrapolated entry tangent. The existing head-to-tail sampling and post-exit travel still pull every segment fully offscreen before the next timer begins.
 
-Only an active creature uses requestAnimationFrame. Waiting uses one timeout, not a repeating interval. React does not rerender per frame. The controller bounds particle work, caps devicePixelRatio at 2 and backing resolution near four million pixels, and cleans up its timer, frame and listeners on unmount. Resize cancels the current event, resizes the backing canvas and starts a fresh delay.
+Size scales stay unchanged: desktop Small/Medium/Large = 1×/1.85×/3× the desktop base; narrow screens = 1×/1.5×/2.15× the 0.56 mobile base. Body length and actual scale inform route choice and clearance. The Large entry impact is still timed from the first visible head sample, now guaranteed to exist.
 
-Hidden tabs cancel all active/waiting animation work. Becoming visible starts a new wait. **Reduced motion disables spawning completely**, including when the preference changes while the page is open; CSS also hides the canvas.
+Resize/rotation clears the old event, resizes the canvas backing store and schedules the next event using fresh dimensions. Recent size history survives resize, visibility changes and normal page navigation. No duplicate timer or RAF loop is introduced.
 
-## Files
+## Adaptive size selection
 
-Created:
+A separate helper, wraith-size.ts, computes weights from the last four selections, oldest first in storage. The controller owns this short history for its mounted lifetime. Reload/unmount may reset it. Faction still uses its own independent 50/50 draw before size selection, and the same size algorithm is used on every viewport.
 
-- `src/components/lobby-wraith-effect.tsx` — client-only global canvas component.
-- `src/lib/wraith-path.ts` — route generation, arc-length sampling and articulated poses.
-- `src/lib/wraith-render.ts` — original variant geometry, glow, runes and bounded particles.
-- `src/lib/wraith-controller.ts` — lifecycle, randomized waits, sizing and accessibility preferences.
-- `src/lib/wraith.test.ts` — geometry/controller regression tests.
-- `scripts/test-wraith.cjs` — SSR, hydration, navigation and interaction regression.
-- `WRAITH-EFFECT.md` — this report.
+1. Base weights: Small = Medium = Large = 1.
+2. Each occurrence multiplies that size's weight by its age factor: newest 0.65, then 0.82, 0.92 and 0.97.
+3. Consecutive repeats add a factor of 0.78 for each repeat beyond the first, bounded by the four-result window.
+4. If a size is absent from a history containing at least three results, its weight gets a modest 1.15 multiplier.
+5. Every final weight is floored at 0.20.
+6. One weighted random draw chooses the result. No size is forbidden or forced; even repeated Large appearances remain possible.
 
-Modified:
+As a result ages its penalty weakens, and after four newer results it disappears completely. The absence bonus is bounded, not a growing debt. Very long streaks remain unlikely but their penalty does not grow forever.
 
-- `src/app/layout.tsx` — mount the effect once.
-- `src/app/globals.css` — isolated canvas positioning and reduced-motion rule.
-- `scripts/test-portable.cjs` — include the wraith unit tests.
+Example unnormalized weights:
 
-No database, authentication, OpenDota, heroes, match logic, forms, screenshots or ranking implementation was changed.
+| Recent results (oldest first) | Small | Medium | Large |
+| --- | ---: | ---: | ---: |
+| None | 1.00000 | 1.00000 | 1.00000 |
+| Small | 0.65000 | 1.00000 | 1.00000 |
+| Small, Small | 0.41574 | 1.00000 | 1.00000 |
+| Small, Medium | 0.82000 | 0.65000 | 1.00000 |
+| Small, Small, Medium, Large | 0.89240 | 0.82000 | 0.65000 |
 
-## Verification
+Probabilities are each weight divided by the total. There is no fixed 45/35/20 split anymore and no rotation. Spawn timing is unchanged: a randomized **8–22 seconds**, initially and after each completed event. Existing size-dependent durations remain unchanged.
 
-| Check | Result |
-| --- | --- |
-| `npm run typecheck` | Passed |
-| `npm run lint` | Passed |
-| `npm run test:portable` | Passed: 62 tests |
-| `node scripts/test-wraith.cjs` | Passed |
-| `npm run test:forms` | Passed: 11 existing regression groups |
-| `npm test` | Blocked: Vitest worker `spawn EPERM` |
-| `npm run build` | Blocked: Next.js subprocess `spawn EPERM` |
+## Files changed
 
-Automated checks cover independent variant selection, variable entry/exit edges, bounded duration, articulated poses, all segments starting/ending offscreen, one timer/RAF controller, fresh post-event delays, mobile sizing, resize, hidden-tab behavior, live reduced-motion changes and cleanup. JSDOM checks cover server rendering before browser globals exist, hydration without warnings, one canvas across simulated navigation, clickable controls, retained input and unchanged scroll styles. Existing form, award, hero, screenshot and leaderboard regressions pass.
+- Created src/lib/wraith-size.ts: pure adaptive weight/selection helpers.
+- Modified src/lib/wraith-path.ts: responsive crossing corridors and helper integration.
+- Modified src/lib/wraith-controller.ts: bounded, controller-local size history.
+- Modified src/lib/wraith.test.ts: weight, viewport and regression tests.
+- Updated WRAITH-EFFECT.md: this report.
 
-Actual browser compositing, visual motion quality, touchscreen behavior and device frame rates were not measured. The canvas renderer was exercised with a recording/mock context; JSDOM cannot verify browser hit-testing or visual layout. To see it locally, run `npm run dev`, keep the tab visible with reduced motion off, and allow up to 22 seconds for the first appearance. Rerun the blocked commands in your normal terminal before release.
+The renderer, creature component, root layout, stylesheet and interaction architecture were not changed in this refinement.
 
-No commit, push, deployment or production operation was performed.
+## Validation
 
+- npm run typecheck: passed.
+- npm run lint: passed.
+- npm run test:portable: 65 tests passed.
+- node scripts/test-wraith.cjs: SSR/hydration, navigation, interaction and cleanup regression.
+- npm run test:forms: existing 11 UI regression groups.
+- npm test: blocked by Vitest worker spawn EPERM.
+- npm run build: blocked by Next.js child-process spawn EPERM.
 
-## Size/frequency update
+The new viewport matrix exercises 1,080 deterministic routes: both factions, all three sizes, 20 random seeds, and nine sizes (3440×1440, 1920×1080, 1366×768, 600×900, 1024×768, 768×1024, 390×844, 320×568, 844×390). It checks visible head travel, at least 45% of segments simultaneously visible, actual entry coordinates, natural full exit and stronger Large interior coverage. Existing tests check articulation/spacing, canvas sizing, resize, reduced motion, single-loop behavior and cleanup. Probability tests cover balanced bases, penalties for each size, stronger repeat penalties, recovery, absence bonus, minimum weights, all outcomes remaining possible, history truncation and independent faction selection.
 
-The creature silhouettes, segmented-following algorithm, global controller and interaction protections are unchanged. Each spawn uses separate random draws for faction (50/50) and size (Small 45%, Medium 35%, Large 20%). The first and subsequent waits are now 8–22 seconds, starting only after the entire preceding event finishes.
-
-| Size | Probability | Desktop multiplier | Mobile multiplier (width below 700px) |
-| --- | --- | --- | --- |
-| Small | 45% | 1× | 1× |
-| Medium | 35% | 1.85× | 1.5× |
-| Large | 20% | 3× | 2.15× |
-
-Exact base scale remains 0.56 on mobile and clamp(width / 1440, 0.78, 1.12) on desktop. At 1440px the resulting scales are 1, 1.85 and 3; on mobile they are 0.56, 0.84 and 1.204. Head, body, tail and segment spacing scale together. The canvas itself is not scaled to enlarge the creature.
-
-Medium events run for 1.15 times the original route-based duration; Large for 1.4 times. This gives the larger creatures more time to cross without pausing their movement. Small keeps the original duration. Large uses opposite edges so it crosses the viewport rather than taking a short corner route. Overscan accounts for the larger head, and the tail continues beyond the exit.
-
-Only Large gets layered low-opacity clouds along the head/body plus an expanding entry ring and radial debris. The impact is timed to the head reaching the viewport boundary, with a 0.35-second pre-glow and a 1.2-second burst/fade. Dire uses dark crimson smoke and orange embers; Radiant uses gold/cyan luminous haze and diamond rune fragments. There is no screen shake, layout movement or full-screen opaque overlay. Effects fade with the same event and require no extra timer or RAF loop.
-
-Steady particle counts are capped at 15/19/26 desktop and 7/9/12 mobile. The Large entry burst adds at most 12 desktop or 7 mobile fragments briefly, plus 5 desktop or 3 mobile clouds with three translucent layers each. Glow radii scale with size while staying bounded; the existing DPR/pixel budget remains intact.
-
-Files changed in this update: src/lib/wraith-path.ts, src/lib/wraith-render.ts, src/lib/wraith.test.ts, and this report. The previously added controller, global mount, styles and interaction safeguards were left untouched.
-
-Validation: typecheck and lint passed; 62 portable tests passed, including all six faction/size combinations, probability boundaries, proportional spacing, edge-crossing geometry, entry timing, single-event scheduling and cleanup. The hydration/interaction test and existing form regressions were rerun. Standard Vitest and build remain blocked by spawn EPERM. Actual visual appearance and frame rate on physical desktop/mobile devices remain for local browser review; no performance measurement is claimed.
+These are numerical/Canvas-mock and JSDOM checks, not real-device visual/FPS measurements. Physical device rendering, touch hit-testing and subjective movement quality remain for local browser review. No production changes, commits, pushes or deployments were performed.

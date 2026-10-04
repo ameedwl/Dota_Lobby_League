@@ -1,3 +1,4 @@
+import {testRewards} from "./test-rewards-database.mjs";
 import {migrateHeroes,testHeroes} from "./test-heroes-database.mjs";
 import {testOpenDota} from "./test-opendota-database.mjs";
 import {testScreenshots} from "./test-screenshots-database.mjs";
@@ -201,8 +202,12 @@ await test("admin edits league settings",async()=>{
 await testOpenDota({db,role,test,admin,viewer});
 await testHeroes({db,role,test,admin,viewer,players:initial.players});
 await testScreenshots({db,role,test,admin,viewer,matchId:initial.matches[1].id});
+await testRewards({db,role,test,admin,viewer});
+// Re-run hero/draft/save compatibility against the reward-enabled transaction.
+await testHeroes({db,role,test,admin,viewer,players:initial.players});
 await test("role revocation immediately blocks database writes with same user identity",async()=>{
  await db.query("update public.profiles set role='viewer' where id=$1",[admin]);
+ await assert.rejects(role(admin,tx=>tx.query("select public.roll_reward(gen_random_uuid())")),code("42501"));
  await assert.rejects(role(admin,tx=>tx.query("insert into public.players(name,nickname) values('No','NO')")),code("42501"));
  const path=`matches/${initial.matches[2].id}/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png`;
  await assert.rejects(role(admin,tx=>tx.query("insert into storage.objects(bucket_id,name) values('match-screenshots',$1)",[path])),code("42501"));

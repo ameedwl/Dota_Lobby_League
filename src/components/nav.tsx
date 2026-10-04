@@ -5,7 +5,7 @@ import {Menu,Shield,X} from "./icons";
 import {useState} from "react";
 import {useAuth} from "@/lib/auth";
 import {useLeague} from "@/lib/store";
-const links=[["/","Home"],["/leaderboard","Leaderboard"],["/matches","Matches"],["/players","Players"],["/stats","Stats"]];
+const links=[["/","Home"],["/leaderboard","Leaderboard"],["/matches","Matches"],["/players","Players"],["/stats","Stats"],["/rewards","Rewards"]];
 export function Nav(){
  const path=usePathname(),[open,setOpen]=useState(false),[error,setError]=useState(""),[busy,setBusy]=useState(false);
  const {user,isAdmin,signOut}=useAuth(),{settings}=useLeague();

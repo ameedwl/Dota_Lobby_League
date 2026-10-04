@@ -1,5 +1,6 @@
 "use client";
 import { createContext,useCallback,useContext,useEffect,useRef,useState } from "react";
+import type { Reward, RewardDefinition, RewardSelection } from "./rewards";
 import { cleanupScreenshotFiles } from "./screenshots";
 import { LobbyMatch,Player } from "./types";
 import { LeagueData } from "./league";
@@ -8,7 +9,8 @@ import { validateMatch } from "./stats";
 import { useAuth } from "./auth";
 import { backendError,getSupabase } from "./supabase";
 import { decodeSnapshot,encodeMatch,encodePlayer,LeagueSettings } from "./backend";
-type Store=LeagueData&{ready:boolean;hasSnapshot:boolean;error:string;settings:LeagueSettings;refresh:()=>Promise<boolean>;
+type Store=LeagueData&{rewards:Reward[];rewardCatalog:RewardDefinition[];rewardsReady:boolean;
+ rollReward:(id:string)=>Promise<{reward?:Reward;error:string|null}>;configureReward:(id:string,selection:RewardSelection)=>Promise<{reward?:Reward;error:string|null}>;cancelReward:(id:string,reason:string)=>Promise<{reward?:Reward;error:string|null}>;ready:boolean;hasSnapshot:boolean;error:string;settings:LeagueSettings;refresh:()=>Promise<boolean>;
  addMatch:(m:LobbyMatch)=>Promise<string|null>;updateMatch:(m:LobbyMatch)=>Promise<string|null>;deleteMatch:(id:string)=>Promise<string|null>;
  addPlayer:(p:Player)=>Promise<string|null>;updatePlayer:(p:Player)=>Promise<string|null>;deletePlayer:(id:string)=>Promise<string|null>;
  updateSettings:(s:LeagueSettings)=>Promise<string|null>};
@@ -16,6 +18,7 @@ const C=createContext<Store|null>(null);
 export function LeagueProvider({children}:{children:React.ReactNode}){
  const auth=useAuth(),client=getSupabase();
  const [data,setData]=useState<LeagueData>({players:[],matches:[]}),[settings,setSettings]=useState<LeagueSettings>({name:"Lobby Legends",season:"Season I"});
+ const [rewardData,setRewardData]=useState<{rewards:Reward[];rewardCatalog:RewardDefinition[];rewardsReady:boolean}>({rewards:[],rewardCatalog:[],rewardsReady:false});
  const [hasSnapshot,setHasSnapshot]=useState(false);
  const [ready,setReady]=useState(false),[error,setError]=useState("");
  const request=useRef(0),busy=useRef(false);
@@ -26,7 +29,7 @@ export function LeagueProvider({children}:{children:React.ReactNode}){
    const result=await client.rpc("league_snapshot");
    if(result.error)throw result.error;
    const next=decodeSnapshot(result.data);
-   if(version===request.current){setHasSnapshot(true);setData(next);setSettings(next.settings);setReady(true);setError("");}
+   if(version===request.current){setHasSnapshot(true);setData(next);setRewardData({rewards:next.rewards,rewardCatalog:next.rewardCatalog,rewardsReady:next.rewardsReady});setSettings(next.settings);setReady(true);setError("");}
    return true;
   }catch(e){
    if(version===request.current){setReady(true);setError(backendError(e as {message:string;code?:string}));}
@@ -74,7 +77,19 @@ export function LeagueProvider({children}:{children:React.ReactNode}){
   if(p.dotaAccountId&&data.players.some(other=>other.id!==p.id&&other.dotaAccountId===p.dotaAccountId))return Promise.resolve("This Dota Account ID is already assigned to another player.");
   return write(()=>create?client!.from("players").insert(encodePlayer(p)).select("id"):client!.from("players").update(encodePlayer(p)).eq("id",p.id).select("id"),true);
  };
- return <C.Provider value={{...data,settings,ready,hasSnapshot,error,refresh,
+ async function rewardAction(name:string,args:Record<string,unknown>){
+  let reward:Reward|undefined;
+  const error=await write(async()=>{
+   const result=await client!.rpc(name,args);
+   if(!result.error)reward=result.data as Reward;
+   return result;
+  });
+  return {reward,error};
+ }
+ return <C.Provider value={{...data,...rewardData,
+  rollReward:id=>rewardAction("roll_reward",{p_reward_id:id}),
+  configureReward:(id,selection)=>rewardAction("configure_reward",{p_reward_id:id,p_selection:selection}),
+  cancelReward:(id,reason)=>rewardAction("cancel_reward",{p_reward_id:id,p_reason:reason}),settings,ready,hasSnapshot,error,refresh,
   addMatch:m=>saveMatch(m,true),updateMatch:m=>saveMatch(m,false),
   deleteMatch:async id=>{const issue=await write(()=>client!.from("matches").delete().eq("id",id).select("id"),true);if(!issue&&client)void cleanupScreenshotFiles(client).catch(()=>{});return issue;},
   addPlayer:p=>savePlayer(p,true),

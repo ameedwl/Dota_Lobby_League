@@ -21,7 +21,8 @@ export type RewardKey = typeof rewardCatalog[number]["key"];
 export type RewardStatus = "available" | "pending_configuration" | "active" | "used" | "cancelled";
 export type RewardDefinition = {key:RewardKey;configuration:RewardConfig;enabled:boolean};
 export type Reward = {
-  id:string;player_id:string;qualifying_match_id:string|null;qualifying_match_snapshot:string;
+  id:string;player_id:string;qualifying_match_id:string|null;qualifying_match_snapshot:string|null;
+  source_type?:"STREAK_MILESTONE"|"ADMIN_GRANT";streak_milestone?:number|null;reroll_count?:number;revision?:number;grant_reason?:string|null;
   reward_key:RewardKey|null;status:RewardStatus;target_player_id:string|null;
   secondary_target_player_id:string|null;target_role:number|null;target_hero_id:number|null;
   earned_at:string;rolled_at:string|null;activated_at:string|null;used_at:string|null;
@@ -34,7 +35,7 @@ export const statusLabel:Record<RewardStatus,string> = {available:"Roll availabl
 export function rewardInstruction(reward:Reward, players:Player[]):string {
   const name = (id:string|null) => players.find(p => p.id === id)?.nickname ?? "Unknown player";
   const owner = name(reward.player_id), target = name(reward.target_player_id), role = `Position ${reward.target_role}`;
-  if (reward.status === "available") return "Earned by reaching three consecutive wins. The roll is final.";
+  if (reward.status === "available") return reward.source_type === "ADMIN_GRANT" ? "An administrator granted this roll. It does not change your reward streak." : "Earned at the " + (reward.streak_milestone ?? 3) + "-win milestone. Each entitlement is rolled separately.";
   if (reward.status === "pending_configuration") return rewardDefinition(reward.reward_key)?.description ?? "Configuration required.";
   switch (reward.reward_key) {
     case "pick_teams": return `${owner} chooses the Radiant and Dire teams.`;
@@ -62,4 +63,20 @@ export function rewardConflicts(rewards:Reward[]):string[] {
     if (a.reward_key === "random_hero_curse" && b.reward_key === "random_hero_curse" && a.target_player_id === b.target_player_id && a.target_hero_id !== b.target_hero_id) warnings.add("A player has different assigned heroes. Resolve these house rules before playing.");
   }
   return [...warnings];
+}
+
+export type RewardBaseline = {baseline_match_id:string|null;baseline_match_snapshot:string|null;baseline_played_at:string|null;updated_at:string};
+export type RewardStreak = {player_id:string;current_streak:number;latest_match_id:string|null};
+export type RewardAudit = {id:string;action:"reroll"|"reset_configuration";previous_result:Reward;new_result:Reward;created_at:string};
+export function milestoneProgress(streak:number) {
+  const nextMilestone=(Math.floor(streak/3)+1)*3;
+  return {nextMilestone,winsNeeded:nextMilestone-streak,reached:streak>0&&streak%3===0};
+}
+export const rewardSourceLabel=(r:Reward)=>r.source_type === "ADMIN_GRANT" ? "Admin grant" : (r.streak_milestone??3)+"-win streak";
+export function groupAvailableRewards(rewards:Reward[]) {
+  const groups=new Map<string,Reward[]>();
+  for(const r of [...rewards].filter(r=>r.status==="available").sort((a,b)=>Date.parse(a.earned_at)-Date.parse(b.earned_at)||a.id.localeCompare(b.id))) {
+    const group=groups.get(r.player_id)??[];group.push(r);groups.set(r.player_id,group);
+  }
+  return [...groups.values()];
 }

@@ -1,3 +1,4 @@
+import {testRewardsV2} from "./test-rewards-v2-database.mjs";
 import {testRewards} from "./test-rewards-database.mjs";
 import {migrateHeroes,testHeroes} from "./test-heroes-database.mjs";
 import {testOpenDota} from "./test-opendota-database.mjs";
@@ -203,6 +204,7 @@ await testOpenDota({db,role,test,admin,viewer});
 await testHeroes({db,role,test,admin,viewer,players:initial.players});
 await testScreenshots({db,role,test,admin,viewer,matchId:initial.matches[1].id});
 await testRewards({db,role,test,admin,viewer});
+await testRewardsV2({db,role,test,admin,viewer});
 // Re-run hero/draft/save compatibility against the reward-enabled transaction.
 await testHeroes({db,role,test,admin,viewer,players:initial.players});
 await test("role revocation immediately blocks database writes with same user identity",async()=>{

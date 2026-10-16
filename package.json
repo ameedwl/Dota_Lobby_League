@@ -13,7 +13,8 @@
     "test:database": "node scripts/test-database.mjs",
     "seed:generate": "node scripts/generate-seed.cjs",
     "test:forms": "node scripts/test-form-drafts.cjs",
-    "test:rewards": "node scripts/test-rewards-ui.cjs"
+    "test:rewards": "node scripts/test-rewards-ui.cjs",
+    "test:birthday": "node scripts/test-birthday-ui.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

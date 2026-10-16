@@ -38,9 +38,9 @@ function largeDisturbance(ctx: CanvasRenderingContext2D, route: WraithRoute, pos
 }
 
 // Original vector geometry, drawn independently at each articulated joint.
-export function drawWraith(ctx: CanvasRenderingContext2D, route: WraithRoute, progress: number, battle?: { pose: ReturnType<typeof wraithPose>; death: number }) {
+export function drawWraith(ctx: CanvasRenderingContext2D, route: WraithRoute, progress: number, battle?: { pose: ReturnType<typeof wraithPose>; death: number }, birthday = false) {
   const pose = battle?.pose ?? wraithPose(route, progress), dire = route.variant === "dire", time = progress * route.duration / 1000;
-  const energy = dire ? "#b82c45" : "#dfbd70", light = dire ? "#ff9b56" : "#a0edec";
+  const energy = birthday ? "#8d65c7" : dire ? "#b82c45" : "#dfbd70", light = birthday ? "#afc8ff" : dire ? "#ff9b56" : "#a0edec";
   if (!battle && route.size === "large") largeDisturbance(ctx, route, pose, progress);
   ctx.save();
   ctx.globalAlpha = (1 - (battle?.death ?? 0)) * 0.72 * Math.min(1, progress * 12, (1 - progress) * 12);

@@ -1,4 +1,6 @@
 "use client";
+import type {RerollCredit} from "./special-event";
+
 import { createContext,useCallback,useContext,useEffect,useRef,useState } from "react";
 import type { Reward, RewardDefinition, RewardSelection, RewardBaseline, RewardStreak, RewardAudit } from "./rewards";
 import { cleanupScreenshotFiles } from "./screenshots";
@@ -10,7 +12,7 @@ import { useAuth } from "./auth";
 import { backendError,getSupabase } from "./supabase";
 import { decodeSnapshot,encodeMatch,encodePlayer,LeagueSettings } from "./backend";
 type RewardResult=Promise<{reward?:Reward;error:string|null}>;
-type Store=LeagueData&{rewardBaseline:RewardBaseline|null;rewardStreaks:RewardStreak[];rewardsV2Ready:boolean;
+type Store=LeagueData&{rerollCredits:RerollCredit[];redeemBirthdayReroll:(credit:string,id:string,revision:number,requestId:string)=>RewardResult;rewardBaseline:RewardBaseline|null;rewardStreaks:RewardStreak[];rewardsV2Ready:boolean;
  rerollReward:(id:string,revision:number,requestId:string)=>RewardResult;resetRewardConfiguration:(id:string,revision:number,requestId:string)=>RewardResult;grantReward:(player:string,reason:string,requestId:string)=>RewardResult;rewardAudit:(id:string)=>Promise<{audit:RewardAudit[];error:string|null}>;rewards:Reward[];rewardCatalog:RewardDefinition[];rewardsReady:boolean;
  rollReward:(id:string)=>Promise<{reward?:Reward;error:string|null}>;configureReward:(id:string,selection:RewardSelection,revision?:number)=>Promise<{reward?:Reward;error:string|null}>;cancelReward:(id:string,reason:string)=>Promise<{reward?:Reward;error:string|null}>;ready:boolean;hasSnapshot:boolean;error:string;settings:LeagueSettings;refresh:()=>Promise<boolean>;
  addMatch:(m:LobbyMatch)=>Promise<string|null>;updateMatch:(m:LobbyMatch)=>Promise<string|null>;deleteMatch:(id:string)=>Promise<string|null>;
@@ -20,7 +22,7 @@ const C=createContext<Store|null>(null);
 export function LeagueProvider({children}:{children:React.ReactNode}){
  const auth=useAuth(),client=getSupabase();
  const [data,setData]=useState<LeagueData>({players:[],matches:[]}),[settings,setSettings]=useState<LeagueSettings>({name:"Lobby Legends",season:"Season I"});
- const [rewardData,setRewardData]=useState<{rewards:Reward[];rewardCatalog:RewardDefinition[];rewardsReady:boolean;rewardBaseline:RewardBaseline|null;rewardStreaks:RewardStreak[];rewardsV2Ready:boolean}>({rewards:[],rewardCatalog:[],rewardsReady:false,rewardBaseline:null,rewardStreaks:[],rewardsV2Ready:false});
+ const [rewardData,setRewardData]=useState<{rerollCredits:RerollCredit[];rewards:Reward[];rewardCatalog:RewardDefinition[];rewardsReady:boolean;rewardBaseline:RewardBaseline|null;rewardStreaks:RewardStreak[];rewardsV2Ready:boolean}>({rerollCredits:[],rewards:[],rewardCatalog:[],rewardsReady:false,rewardBaseline:null,rewardStreaks:[],rewardsV2Ready:false});
  const [hasSnapshot,setHasSnapshot]=useState(false);
  const [ready,setReady]=useState(false),[error,setError]=useState("");
  const request=useRef(0),busy=useRef(false);
@@ -31,7 +33,7 @@ export function LeagueProvider({children}:{children:React.ReactNode}){
    const result=await client.rpc("league_snapshot");
    if(result.error)throw result.error;
    const next=decodeSnapshot(result.data);
-   if(version===request.current){setHasSnapshot(true);setData(next);setRewardData({rewardBaseline:next.rewardBaseline,rewardStreaks:next.rewardStreaks,rewardsV2Ready:next.rewardsV2Ready,rewards:next.rewards,rewardCatalog:next.rewardCatalog,rewardsReady:next.rewardsReady});setSettings(next.settings);setReady(true);setError("");}
+   if(version===request.current){setHasSnapshot(true);setData(next);setRewardData({rerollCredits:next.rerollCredits,rewardBaseline:next.rewardBaseline,rewardStreaks:next.rewardStreaks,rewardsV2Ready:next.rewardsV2Ready,rewards:next.rewards,rewardCatalog:next.rewardCatalog,rewardsReady:next.rewardsReady});setSettings(next.settings);setReady(true);setError("");}
    return true;
   }catch(e){
    if(version===request.current){setReady(true);setError(backendError(e as {message:string;code?:string}));}
@@ -89,6 +91,7 @@ export function LeagueProvider({children}:{children:React.ReactNode}){
   return {reward,error};
  }
  return <C.Provider value={{...data,...rewardData,
+  redeemBirthdayReroll:(credit,id,revision,requestId)=>rewardAction("use_birthday_reroll",{p_credit_id:credit,p_reward_id:id,p_expected_revision:revision,p_request_id:requestId}),
   rollReward:id=>rewardAction("roll_reward",{p_reward_id:id}),
   configureReward:(id,selection,revision)=>rewardAction("configure_reward",{p_reward_id:id,p_selection:{...selection,expected_revision:revision}}),
   rerollReward:(id,revision,requestId)=>rewardAction("reroll_reward",{p_reward_id:id,p_expected_revision:revision,p_request_id:requestId}),

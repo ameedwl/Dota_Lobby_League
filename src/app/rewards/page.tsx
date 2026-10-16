@@ -8,7 +8,7 @@ import {GrantRewardTool} from "@/components/rewards-admin";
 import { groupAvailableRewards, milestoneProgress, rewardCatalog, statusLabel, type Reward } from "@/lib/rewards";
 
 export default function RewardsPage() {
-  const {players,rewards=[],rewardCatalog:enabled=[],rewardsReady,rewardBaseline,rewardStreaks=[],rewardsV2Ready}=useLeague();
+  const {rerollCredits=[],players,rewards=[],rewardCatalog:enabled=[],rewardsReady,rewardBaseline,rewardStreaks=[],rewardsV2Ready}=useLeague();
   const [reveal,setReveal]=useState<Reward|null>(null),[player,setPlayer]=useState(""),[status,setStatus]=useState(""),[kind,setKind]=useState("");
   const stats=rewardStreaks.map(s=>({...s,player:players.find(p=>p.id===s.player_id)})).filter(s=>s.player).sort((a,b)=>b.current_streak-a.current_streak||a.player_id.localeCompare(b.player_id));
   const pool=rewardCatalog.filter(d=>enabled.some(r=>r.key===d.key&&r.enabled));
@@ -20,6 +20,7 @@ export default function RewardsPage() {
     {rewardsReady&&!rewardsV2Ready&&<p className="alert">Reward V2 requires migration 202610100001_reward_milestones_rerolls.sql.</p>}
     {rewardsV2Ready&&<p className="muted">{rewardBaseline?.baseline_match_snapshot?<>Reward era starts with {rewardBaseline.baseline_match_id?<Link href={"/matches/"+rewardBaseline.baseline_match_id}>this included baseline match</Link>:"the stored baseline match (now deleted)"}. Older matches still count for overall statistics.</>:"Reward baseline not set. New milestone grants are paused until the administrator manually runs the reset-to-latest-match script."}</p>}
     <GrantRewardTool/>
+    {rerollCredits.map(c=><div className="panel birthday-gift" key={c.id}><strong>{players.find(p=>p.id===c.player_id)?.nickname??"Player"} · {c.label}</strong><p>{c.remaining_uses?"1 AVAILABLE · Admin can use this gift on an unused rolled reward below. This gift does not expire.":"USED · Birthday reroll recorded in reward history."}</p></div>)}
     {reveal&&<RewardReveal key={reveal.id+":"+(reveal.revision??reveal.reroll_count??0)} reward={reveal} onClose={()=>setReveal(null)}/>}
     <div className="section-row"><h2 className="section-title">Available Rolls</h2><span className="badge">{available.length} unlocked</span></div>
     <div className="reward-grid">{groupAvailableRewards(available).map(group=><RewardCard key={group[0].id} reward={group[0]} availableCount={group.length} onRolled={setReveal}/>)}</div>{!available.length&&<p className="empty">No unused rolls. Win three in a row to break the seal.</p>}

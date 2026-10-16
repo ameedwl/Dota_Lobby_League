@@ -5,27 +5,29 @@ import {useLeague} from "@/lib/store";
 import {rewardDefinition,type Reward,type RewardAudit} from "@/lib/rewards";
 
 export function RewardAdminActions({reward,onRolled,history}:{reward:Reward;onRolled?:(r:Reward)=>void;history:boolean}) {
-  const {rerollReward,resetRewardConfiguration,cancelReward,rewardAudit,rewardsV2Ready}=useLeague();
+  const {rerollReward,resetRewardConfiguration,cancelReward,rewardAudit,rewardsV2Ready,rerollCredits=[],redeemBirthdayReroll}=useLeague();
   const [busy,setBusy]=useState(false),[error,setError]=useState(""),[reason,setReason]=useState(""),[audit,setAudit]=useState<RewardAudit[]>([]),[loaded,setLoaded]=useState(false);
   const requests=useRef<Record<string,string>>({});
   const unused=reward.status!=="used"&&reward.status!=="cancelled"&&!reward.used_at;
   const rolled=["active","pending_configuration"].includes(reward.status);
+  const credit=rerollCredits.find(c=>c.player_id===reward.player_id&&c.remaining_uses>0);
   const def=rewardDefinition(reward.reward_key);
-  async function correct(kind:"reroll"|"reset") {
-    const message=kind==="reroll"?`Reroll ${def?.name}? Replace it with a different enabled reward at equal odds and clear its configuration. The original entitlement and milestone are kept.`:"Reset configuration? This reward will stop being active until configured again. Random hero/role assignments will be drawn again after choosing a target.";
+  async function correct(kind:"reroll"|"reset"|"birthday") {
+    const message=kind!=="reset"?`${kind==="birthday"?"Use the one-time birthday credit? ":""}Reroll ${def?.name}? Replace it with a different enabled reward at equal odds and clear its configuration. The original entitlement and milestone are kept.`:"Reset configuration? This reward will stop being active until configured again. Random hero/role assignments will be drawn again after choosing a target.";
     if(busy||!window.confirm(message))return;
     setBusy(true);setError("");
     const key=kind+":"+(reward.revision??0);
     const requestId=requests.current[key]??=crypto.randomUUID();
     try {
       const action=kind==="reroll"?rerollReward:resetRewardConfiguration;
-      const result=await action(reward.id,reward.revision??0,requestId);
+      const result=kind==="birthday"&&credit?await redeemBirthdayReroll(credit.id,reward.id,reward.revision??0,requestId):await action(reward.id,reward.revision??0,requestId);
       if(result.error)setError(result.error);
-      else if(result.reward){setLoaded(false);if(kind==="reroll")onRolled?.(result.reward);}
+      else if(result.reward){setLoaded(false);if(kind!=="reset")onRolled?.(result.reward);}
     }catch{setError("Could not confirm the change. Retry safely with the same request.");}finally{setBusy(false);}
   }
   return <details className="reward-correction"><summary>{unused?"Admin correction":"Admin audit"}{reward.reroll_count?` · ${reward.reroll_count} rerolls`:""}</summary>
     {unused&&<>
+      {credit&&rolled&&<button className="button secondary" disabled={busy} onClick={()=>void correct("birthday")}>Use birthday reroll</button>}
       {rewardsV2Ready&&rolled&&<button className="button secondary" disabled={busy} onClick={()=>void correct("reroll")}>Reroll reward</button>}
       {rewardsV2Ready&&reward.status==="active"&&def?.configuration!=="none"&&<button className="button secondary" disabled={busy} onClick={()=>void correct("reset")}>Reset configuration</button>}
       <label htmlFor={"reason-"+(history?"history-":"")+reward.id}>Reason for voiding</label><input id={"reason-"+(history?"history-":"")+reward.id} value={reason} maxLength={500} onChange={e=>setReason(e.target.value)} placeholder="Explain the recording mistake"/>

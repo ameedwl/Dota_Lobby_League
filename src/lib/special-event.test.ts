@@ -1,0 +1,6 @@
+import {test} from "vitest";
+import assert from "node:assert/strict";
+import {birthdayEvent,eventActive,eventPlayer,countdown,birthdayChance} from "./special-event";
+test("birthday starts inclusively, ends exclusively after 72 hours and countdown clamps",()=>{const s=Date.parse(birthdayEvent.start),e=Date.parse(birthdayEvent.end);assert.equal(e-s,72*3600000);assert.equal(eventActive(s-1),false);assert.equal(eventActive(s),true);assert.equal(eventActive(e-1),true);assert.equal(eventActive(e),false);assert.equal(countdown(s),"3D 0H 0M");assert.equal(countdown(e+1000),"0D 0H 0M");});
+test("birthday resolves only one existing player and never invents an ID",()=>{const p={id:"existing",name:"LUNG",nickname:"Hermes",createdAt:""};assert.equal(eventPlayer([p])?.id,"existing");assert.equal(eventPlayer([]),undefined);assert.equal(eventPlayer([p,{...p,id:"other"}]),undefined);assert.equal(eventPlayer([p],"missing"),undefined);assert.equal(eventPlayer([p],"existing")?.id,"existing");});
+test("birthday wraith is rare, disabled outside event and never consecutive",()=>{assert.equal(birthdayChance(true,false,.089),true);assert.equal(birthdayChance(true,false,.09),false);assert.equal(birthdayChance(false,false,0),false);assert.equal(birthdayChance(true,true,0),false);});

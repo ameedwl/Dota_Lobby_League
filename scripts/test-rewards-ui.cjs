@@ -25,11 +25,12 @@ const client={from(){return {select(){return this;},eq(){return this;},async ord
  }
  if(name==='cancel_reward'){snapshot.rewards=snapshot.rewards.map(r=>r.id===args.p_reward_id?{...r,status:'cancelled',cancel_reason:args.p_reason}:r);return {data:structuredClone(snapshot.rewards[0]),error:null};}
 
- if(name==='reroll_reward'||name==='reset_reward_configuration'){
-  if(name==='reroll_reward')rerolls++;else resets++;
+ if(name==='reroll_reward'||name==='reset_reward_configuration'||name==='use_birthday_reroll'){
+  if(name==='use_birthday_reroll'){assert.equal(snapshot.reroll_credits[0].remaining_uses,1);assert.equal(args.p_credit_id,'birthday');snapshot.reroll_credits[0].remaining_uses=0;}
+  if(name!=='reset_reward_configuration')rerolls++;else resets++;
   const r=snapshot.rewards.find(r=>r.id===args.p_reward_id);assert.equal(args.p_expected_revision,r.revision);assert.ok(args.p_request_id);
-  const key=name==='reroll_reward'?(r.reward_key==='role_commander'?'hero_protection':'self_silence'):r.reward_key;
-  const next={...r,reward_key:key,revision:r.revision+1,reroll_count:r.reroll_count+(name==='reroll_reward'?1:0),target_player_id:null,secondary_target_player_id:null,target_hero_id:null,target_role:null,status:key==='self_silence'?'active':'pending_configuration'};
+  const key=name==='use_birthday_reroll'?'pick_teams':name==='reroll_reward'?(r.reward_key==='role_commander'?'hero_protection':'self_silence'):r.reward_key;
+  const next={...r,reward_key:key,revision:r.revision+1,reroll_count:r.reroll_count+(name!=='reset_reward_configuration'?1:0),target_player_id:null,secondary_target_player_id:null,target_hero_id:null,target_role:null,status:['self_silence','pick_teams'].includes(key)?'active':'pending_configuration'};
   audit.push({id:'a'+audit.length,action:name==='reroll_reward'?'reroll':'reset_configuration',previous_result:r,new_result:next,created_at:'2026-10-10T12:00:00Z'});
   snapshot.rewards=snapshot.rewards.map(x=>x.id===r.id?next:x);return {data:structuredClone(next),error:null};
  }
@@ -84,6 +85,7 @@ const fill=(id,value)=>settle(()=>{const el=document.getElementById(id);assert.o
  await fill('r1hero','98');await settle(()=>document.querySelector('.reward-config').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
  await press('Reroll reward');await settle();assert.equal(rerolls,2);assert.match(document.querySelector('.reward-reveal').textContent,/Self Silence/);await press('Continue');await press('Load audit');assert.match(document.body.textContent,/Reroll #1/);
  console.log('PASS Rewards V2: reroll/reset confirmations, repeated authoritative reveals, cleared configuration and audit display.');
+ snapshot.reroll_credits=[{id:'birthday',player_id:'p0',source_key:'lung-birthday-2026',label:'Lung birthday reroll',remaining_uses:1}];await poll();assert.match(document.body.textContent,/does not expire/);window.confirm=()=>false;await press('Use birthday reroll');assert.equal(snapshot.reroll_credits[0].remaining_uses,1);window.confirm=()=>true;await press('Use birthday reroll');assert.equal(snapshot.reroll_credits[0].remaining_uses,0);assert.match(document.body.textContent,/USED · Birthday reroll/);await settle();await press('Continue');assert.ok(![...document.querySelectorAll('button')].some(b=>b.textContent==='Use birthday reroll'));console.log('PASS Birthday credit UI: confirmed one-credit redemption, persistent status and no repeated-use action.');
  await fill('grant-player','p4');await fill('grant-reason','Try the new tools');await press('Grant reward roll');assert.equal(grants,1);assert.match(document.body.textContent,/Admin grant/);assert.match(document.body.textContent,/Reward streak unchanged/);
  snapshot.rewards.push({...base,id:'extra1',player_id:'p4',streak_milestone:6},{...base,id:'extra2',player_id:'p4',streak_milestone:9});await poll();assert.match(document.body.textContent,/3 reward rolls available/);
  console.log('PASS Rewards V2: manual grant labels and multiple available rolls stay separate; next milestone progress is accurate.');

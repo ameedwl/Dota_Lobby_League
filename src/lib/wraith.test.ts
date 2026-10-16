@@ -51,7 +51,7 @@ function harness(reduced = false) {
     requestAnimationFrame: (fn: FrameRequestCallback) => { frames.set(++id, fn); return id; },
     cancelAnimationFrame: (key: number) => frames.delete(key),
   });
-  const start = () => startWraith(canvas as unknown as HTMLCanvasElement, win as unknown as Window, doc as unknown as Document);
+  const start = (options: {birthday?:boolean;ceremonial?:boolean} = {}) => startWraith(canvas as unknown as HTMLCanvasElement, win as unknown as Window, doc as unknown as Document,options);
   const timer = () => { assert.equal(timers.size, 1); const [key, entry] = [...timers][0]; timers.delete(key); entry.fn(); };
   const frame = (now: number) => { assert.equal(frames.size, 1); const [key, fn] = [...frames][0]; frames.delete(key); fn(now); };
   return { timers, frames, canvas, motion, doc, win, start, timer, frame, draws: () => draws };
@@ -222,4 +222,11 @@ test("Large has slightly higher base odds than battle in shared smart random his
     const route = makeWraithRoute(1440,900,() => roll,[],size);
     assert.equal(route.size,size); assert.equal(route.variant,roll < 0.5 ? "dire" : "radiant");
   }
+});
+
+test("birthday uses one controller, finishes ceremonial pass, and respects reduced motion across six screens",()=>{
+ for(const [width,height] of [[1920,1080],[1366,768],[768,1024],[1024,768],[390,844],[844,390]]){
+ const h=harness();h.win.innerWidth=width;h.win.innerHeight=height;const stop=h.start({birthday:true,ceremonial:true});assert.equal(h.timers.size,1);h.timer();h.frame(0);h.frame(3000);assert.ok(h.draws()>100);h.frame(20000);assert.equal(h.timers.size+h.frames.size,0);stop();
+ }
+ const reduced=harness(true),stop=reduced.start({birthday:true,ceremonial:true});assert.equal(reduced.timers.size+reduced.frames.size,0);stop();
 });

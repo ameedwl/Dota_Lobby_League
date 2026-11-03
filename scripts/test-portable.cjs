@@ -25,3 +25,5 @@ require("../src/lib/wraith.test.ts");
 require("../src/lib/rewards.test.ts");
 
 require("../src/lib/special-event.test.ts");
+
+require("../src/lib/match-tributes.test.ts");
